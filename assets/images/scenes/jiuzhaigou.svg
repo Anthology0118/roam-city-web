@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid slice" role="img" aria-label="九寨沟彩林插画">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#bfe0f5"/>
+      <stop offset="1" stop-color="#e8f4f6"/>
+    </linearGradient>
+    <linearGradient id="lake" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#53d0c2"/>
+      <stop offset=".5" stop-color="#8fe0cf"/>
+      <stop offset="1" stop-color="#cfeef0"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="500" fill="url(#sky)"/>
+  <circle cx="120" cy="90" r="26" fill="#fff2cf" opacity=".85"/>
+  <!-- 雪山远景 -->
+  <path d="M0 250 L110 150 L150 190 L210 130 L270 200 L320 150 L400 250 Z" fill="#b9cbd2"/>
+  <path d="M150 190 L210 130 L225 150 L210 182 Z" fill="#fff" opacity=".85"/>
+  <path d="M210 130 L270 200 L300 250 L0 250 Z" fill="#96aab6" opacity="0" />
+  <!-- 金黄秋山（叠瀑带） -->
+  <path d="M320 330 L360 210 L420 260 L470 190 L540 260 L590 210 L650 330 Z" fill="#b98d4b"/>
+  <path d="M420 260 L470 190 L500 210 L470 246 Z" fill="#fff" opacity=".7"/>
+  <!-- 山体下部 -->
+  <path d="M260 400 L320 240 L380 330 L430 250 L520 360 L600 300 L720 400 L800 360 L800 500 L0 500 L0 400 Z" fill="#7d5f38" opacity="0"/>
+  <path d="M240 470 L300 300 L430 320 L540 240 L680 360 L800 330 L800 500 L0 500 L0 470 Z" fill="#6d6b42"/>
+  <!-- 瀑布 -->
+  <path d="M380 210 L414 330 M470 196 L496 320 M560 214 L584 330" stroke="#ffffff" stroke-width="14" stroke-linecap="round" opacity=".8"/>
+  <path d="M386 210 L420 330 M476 196 L502 320 M566 214 L590 330" stroke="#bfe9ee" stroke-width="6" stroke-linecap="round" opacity=".9"/>
+  <!-- 彩林秋色（左） -->
+  <g>
+    <ellipse cx="150" cy="390" rx="70" ry="52" fill="#e08a2e"/>
+    <ellipse cx="240" cy="400" rx="80" ry="58" fill="#c9552b"/>
+    <ellipse cx="70" cy="420" rx="58" ry="44" fill="#d9b32e"/>
+    <ellipse cx="205" cy="360" rx="46" ry="38" fill="#efb13a"/>
+    <rect x="0" y="430" width="300" height="70" fill="#4a3a26"/>
+  </g>
+  <!-- 彩林（右） -->
+  <g>
+    <ellipse cx="690" cy="390" rx="72" ry="50" fill="#cf5a26"/>
+    <ellipse cx="600" cy="408" rx="66" ry="50" fill="#dd3f2e"/>
+    <ellipse cx="760" cy="420" rx="70" ry="46" fill="#b53c22"/>
+    <rect x="540" y="436" width="260" height="64" fill="#3e3322"/>
+  </g>
+  <!-- 五花海湖面 -->
+  <rect x="0" y="440" width="800" height="60" fill="url(#lake)"/>
+  <ellipse cx="400" cy="470" rx="330" ry="14" fill="#3ec3b6" opacity=".35"/>
+</svg>

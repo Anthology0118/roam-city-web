@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid slice" role="img" aria-label="西湖雷峰塔插画">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f4d9c8"/>
+      <stop offset=".5" stop-color="#fbeee0"/>
+      <stop offset="1" stop-color="#fdf9f0"/>
+    </linearGradient>
+    <linearGradient id="water" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#a9cfc9"/>
+      <stop offset="1" stop-color="#e6f1ee"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="500" fill="url(#sky)"/>
+  <circle cx="640" cy="78" r="34" fill="#fff1cf" opacity=".9"/>
+  <!-- 远山 -->
+  <path d="M0 340 L150 250 L260 330 L380 265 L500 345 Z" fill="#c8b8a6" opacity=".7"/>
+  <!-- 雷峰塔所在小山 -->
+  <path d="M560 430 L640 300 L740 440 Z" fill="#9bae94"/>
+  <path d="M600 430 L640 300 L640 320 L610 430 Z" fill="#7d9278"/>
+  <!-- 雷峰塔（简化层檐） -->
+  <g fill="#5c4a33">
+    <rect x="626" y="252" width="30" height="10"/>
+    <path d="M622 262 h38 l-5 12 h-28 Z"/>
+    <rect x="632" y="274" width="18" height="8"/>
+    <path d="M629 282 h24 l-4 9 h-16 Z"/>
+    <rect x="636" y="291" width="10" height="7"/>
+  </g>
+  <!-- 垂柳（左） -->
+  <path d="M120 350 L100 120 M110 350 L60 180 M130 350 L150 170" stroke="#6b5b3a" stroke-width="6" fill="none" stroke-linecap="round"/>
+  <g stroke="#7fae72" stroke-width="3" fill="none" stroke-linecap="round">
+    <path d="M100 160 q-6 70 6 130 M112 170 q-2 66 8 128 M78 190 q0 70 16 120 M146 180 q2 60 6 120"/>
+    <path d="M92 210 q-24 26 -30 4 M120 240 q-18 22 -22 0 M96 150 q-26 14 -34 -6"/>
+  </g>
+  <!-- 断桥 -->
+  <path d="M0 400 L180 372 L300 400 Z" fill="#caa86c"/>
+  <path d="M0 396 L180 368 L300 396 L300 400 L180 372 L0 400 Z" fill="#e6d6b0"/>
+  <g fill="#caa86c"><rect x="150" y="360" width="14" height="12" rx="3"/><rect x="196" y="364" width="14" height="12" rx="3"/></g>
+  <rect x="150" y="356" width="60" height="7" rx="3.5" fill="#a5844a"/>
+  <!-- 水面 -->
+  <rect y="398" width="800" height="102" fill="url(#water)"/>
+  <!-- 塔倒影（淡） -->
+  <g fill="#7fa49b" opacity=".4">
+    <rect x="626" y="440" width="30" height="8"/>
+    <path d="M621 448 h40 l5 10 h-50 Z"/>
+  </g>
+  <path d="M60 430 h80 M220 460 h60 M460 428 h70 M330 470 h50 M700 442 h70" stroke="#fff" stroke-opacity=".5" stroke-width="3" stroke-linecap="round"/>
+</svg>

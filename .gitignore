@@ -1,0 +1,7 @@
+# ---- 系统 / 编辑器杂项 ----
+Thumbs.db
+Desktop.ini
+.DS_Store
+*.log
+
+# 说明：本仓库为纯静态站点（无依赖），无需忽略 node_modules

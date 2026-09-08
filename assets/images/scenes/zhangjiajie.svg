@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid slice" role="img" aria-label="张家界石峰插画">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#bcd9e2"/>
+      <stop offset=".6" stop-color="#e6f0ec"/>
+      <stop offset="1" stop-color="#f4f6ef"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="500" fill="url(#sky)"/>
+  <!-- 雾带 -->
+  <ellipse cx="220" cy="300" rx="220" ry="26" fill="#fff" opacity=".8"/>
+  <ellipse cx="600" cy="270" rx="240" ry="20" fill="#fff" opacity=".7"/>
+  <ellipse cx="420" cy="350" rx="300" ry="30" fill="#fff" opacity=".55"/>
+  <!-- 远峰群 -->
+  <path d="M60 430 L90 250 L118 180 L132 250 L170 340 L210 250 L232 200 L250 260 L300 420 Z" fill="#9dbcb2"/>
+  <path d="M520 430 L560 240 L592 170 L610 250 L650 350 L690 260 L712 210 L730 260 L770 430 Z" fill="#8fb3a8"/>
+  <!-- 中景独立峰 -->
+  <path d="M150 460 L170 200 L150 150 L130 200 L120 300 L112 460 Z" fill="#6f9889"/>
+  <path d="M180 460 L192 240 L205 190 L220 250 L232 460 Z" fill="#5f8b7c"/>
+  <!-- 前景巨峰柱（张家界特点） -->
+  <path d="M330 500 L340 300 L352 120 L368 210 L386 130 L400 250 L414 300 L424 500 Z" fill="#3f6b5c"/>
+  <path d="M520 500 L534 320 L548 160 L562 260 L580 140 L594 250 L608 330 L622 500 Z" fill="#355e50"/>
+  <path d="M470 500 L480 360 L494 220 L506 260 L516 360 L528 500 Z" fill="#4a7a69"/>
+  <!-- 顶部植被 -->
+  <ellipse cx="360" cy="128" rx="34" ry="16" fill="#2f5c4c"/>
+  <ellipse cx="580" cy="148" rx="36" ry="17" fill="#2a5344"/>
+  <ellipse cx="500" cy="228" rx="26" ry="13" fill="#2f5c4c"/>
+  <!-- 前景树林 -->
+  <path d="M0 500 L0 430 L40 400 L70 452 L120 410 L160 470 L200 500 Z" fill="#2e5a4a"/>
+  <path d="M800 500 L800 428 L760 398 L730 446 L690 406 L660 455 L620 500 Z" fill="#2e5a4a"/>
+  <!-- 飞鸟 -->
+  <path d="M240 120 q10 -8 20 0 q10 -8 20 0 M300 160 q8 -6 16 0 q8 -6 16 0" stroke="#355e50" stroke-width="2.4" fill="none" stroke-linecap="round" opacity=".6"/>
+</svg>

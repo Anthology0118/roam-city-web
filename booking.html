@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="漫游城市 · 门票预约 —— 在线预约景区门票，实时校验表单并保存本地订单">
+  <title>门票预约 · 漫游城市</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🧭</text></svg>">
+  <link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body data-page="booking">
+
+  <div id="preloader" aria-hidden="true">
+    <div style="text-align:center">
+      <div class="loader-ring"></div>
+      <div class="loader-text">漫游加载中…</div>
+    </div>
+  </div>
+  <div id="progress" aria-hidden="true"></div>
+
+  <!-- ================= 顶部导航 ================= -->
+  <header class="site-header">
+    <div class="nav-wrap">
+      <a href="index.html" class="logo">
+        <span class="logo-mark">🧭</span>
+        <span>漫游城市<small style="display:block;font-size:.6rem;letter-spacing:3px;opacity:.8">ROAM CITY</small></span>
+      </a>
+      <nav class="site-nav" aria-label="主导航">
+        <ul>
+          <li><a class="nav-link" href="index.html">首页</a></li>
+          <li><a class="nav-link" href="scenic.html">精选景点</a></li>
+          <li><a class="nav-link" href="guide.html">旅行攻略</a></li>
+          <li><a class="nav-link" href="gallery.html">视觉图集</a></li>
+          <li style="display:flex;align-items:center"><a class="btn btn-primary btn-sm nav-cta" href="booking.html">🎫 门票预约</a></li>
+        </ul>
+      </nav>
+      <div class="top-phone">📞 400-800-6666</div>
+      <button class="hamburger" aria-label="展开菜单"><span></span><span></span><span></span></button>
+    </div>
+  </header>
+
+  <main>
+    <!-- 页面标题条 -->
+    <section class="page-hero">
+      <div class="container">
+        <div class="crumbs"><a href="index.html">首页</a> › 门票预约</div>
+        <h1>门票预约 <span style="color:#7fe3e0">·</span> 说走就走</h1>
+        <p>填写并校验下方表单即可“预约成功”，订单保存在浏览器本地 —— 演示了完整的表单验证与数据持久化。</p>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container">
+        <div class="booking-layout">
+          <!-- ===== 左：预约表单 ===== -->
+          <div class="form-card reveal">
+            <!-- 表单主体 -->
+            <div id="bkFields">
+              <h2>🎫 填写预约信息</h2>
+              <p class="fc-sub">带 <span style="color:#f2601e">*</span> 为必填项，提交前会逐项实时校验</p>
+
+              <form id="bkForm" novalidate>
+                <div class="form-grid">
+                  <!-- 景区 -->
+                  <div class="field">
+                    <label for="fSpot">选择景区 <span class="req">*</span></label>
+                    <select id="fSpot" name="spot"></select>
+                    <span class="err-msg" id="eSpot"></span>
+                  </div>
+
+                  <!-- 游玩日期 -->
+                  <div class="field">
+                    <label for="fDate">游玩日期 <span class="req">*</span></label>
+                    <div class="dates" id="dateChips"></div>
+                    <input type="date" id="fDate" name="date">
+                    <span class="err-msg" id="eDate"></span>
+                  </div>
+
+                  <!-- 场次 -->
+                  <div class="field">
+                    <label for="fSession">入场场次 <span class="req">*</span></label>
+                    <select id="fSession" name="session">
+                      <option value="上午场 08:00-12:00">上午场 08:00-12:00</option>
+                      <option value="下午场 12:00-17:00" selected>下午场 12:00-17:00</option>
+                      <option value="全天场不限时">全天场不限时</option>
+                    </select>
+                    <span class="err-msg"></span>
+                  </div>
+
+                  <!-- 票种 -->
+                  <div class="field">
+                    <label for="fType">门票类型 <span class="req">*</span></label>
+                    <select id="fType" name="type">
+                      <option value="成人票" data-rate="1">成人票（挂牌价）</option>
+                      <option value="学生票" data-rate="0.5">学生票（5 折，需证件）</option>
+                    </select>
+                    <span class="err-msg"></span>
+                  </div>
+
+                  <!-- 人数 -->
+                  <div class="field">
+                    <label>购票数量 <span class="req">*</span>（最多 9 张）</label>
+                    <div class="stepper">
+                      <button type="button" id="fMinus" aria-label="减少一张">−</button>
+                      <output id="fCountOut" aria-live="polite">1</output>
+                      <button type="button" id="fPlus" aria-label="增加一张">+</button>
+                    </div>
+                    <span class="err-msg" id="eCount"></span>
+                  </div>
+
+                  <!-- 出行人 -->
+                  <div class="field">
+                    <label for="fName">出行人姓名 <span class="req">*</span></label>
+                    <input type="text" id="fName" name="name" placeholder="与身份证一致" autocomplete="name">
+                    <span class="err-msg" id="eName"></span>
+                  </div>
+
+                  <!-- 手机 -->
+                  <div class="field">
+                    <label for="fPhone">手机号码 <span class="req">*</span></label>
+                    <input type="tel" id="fPhone" name="phone" placeholder="11 位大陆手机号" autocomplete="tel">
+                    <span class="err-msg" id="ePhone"></span>
+                  </div>
+
+                  <!-- 身份证（选填但需格式正确） -->
+                  <div class="field">
+                    <label for="fId">身份证号 <span style="color:#999">（部分景区实名，选填）</span></label>
+                    <input type="text" id="fId" name="idcard" placeholder="18 位身份证（可留空）">
+                    <span class="err-msg" id="eId"></span>
+                  </div>
+
+                  <!-- 邮箱（选填） -->
+                  <div class="field">
+                    <label for="fEmail">电子邮箱 <span style="color:#999">（选填，用于接收行程单）</span></label>
+                    <input type="email" id="fEmail" name="email" placeholder="you@example.com">
+                    <span class="err-msg" id="eEmail"></span>
+                  </div>
+
+                  <!-- 费用汇总 -->
+                  <div class="span-2">
+                    <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;background:#fff8ec;border:1px dashed #f2c879;border-radius:12px;padding:12px 16px">
+                      <span style="font-size:.92rem">📋 单价：<b id="sumUnit" style="color:#f2601e">¥0</b> × <span id="sumCount">1</span> 张</span>
+                      <span style="font-size:1.15rem">应付总额：<b id="sumTotal" style="color:#f2601e;font-size:1.4rem">¥0</b></span>
+                    </div>
+                  </div>
+
+                  <!-- 同意条款 -->
+                  <div class="span-2">
+                    <label class="agree">
+                      <input type="checkbox" id="fAgree">
+                      <span>我已阅读并同意《漫游城市预约须知》：支持开场前 2 小时免费取消，实名信息仅供演示存储在本机。</span>
+                    </label>
+                    <span class="err-msg" id="eAgree"></span>
+                  </div>
+
+                  <div class="span-2" style="text-align:center">
+                    <button type="submit" class="btn btn-primary" style="min-width:220px">✅ 提交预约</button>
+                    <button type="reset" class="btn btn-outline" style="margin-left:10px">清空重填</button>
+                  </div>
+                </div>
+              </form>
+            </div>
+
+            <!-- 预约成功卡 -->
+            <div class="success-card" id="bkSuccess">
+              <div class="ok-icon">✔</div>
+              <h3>预约成功，说走就走！</h3>
+              <p id="successMsg"></p>
+              <button type="button" class="btn btn-outline" id="againBtn">再预约一单</button>
+            </div>
+          </div>
+
+          <!-- ===== 右：我的订单 ===== -->
+          <div class="order-card reveal" style="transition-delay:.06s">
+            <h2>🧾 我的订单 <span id="orderCount" style="font-size:.9rem;color:var(--ink-soft);font-weight:400"></span></h2>
+            <p class="fc-sub">已保存 <b id="orderTotal"></b>，可随时取消（演示用 localStorage 存储）</p>
+            <div class="order-list" id="orderList"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ================= 页脚 ================= -->
+  <footer class="site-footer">
+    <div class="container">
+      <div class="footer-grid">
+        <div class="footer-brand">
+          <a class="logo" href="index.html"><span class="logo-mark">🧭</span>漫游城市</a>
+          <p>一个纯 HTML / CSS / JavaScript 实现的旅游攻略站课程设计作品。山水、古城、海岛、人文——先在这里预览，再出发。</p>
+          <p style="color:#ffd9c4">⭐ 4.9 · 累计 4.2w+ 旅友好评</p>
+        </div>
+        <div class="footer-col">
+          <h4>快速导航</h4>
+          <ul>
+            <li><a href="index.html">首页</a></li>
+            <li><a href="scenic.html">精选景点</a></li>
+            <li><a href="guide.html">旅行攻略</a></li>
+            <li><a href="gallery.html">视觉图集</a></li>
+            <li><a href="booking.html">门票预约</a></li>
+          </ul>
+        </div>
+        <div class="footer-col">
+          <h4>热门目的地</h4>
+          <ul>
+            <li><a href="scenic.html?spot=guilin">桂林 · 漓江</a></li>
+            <li><a href="scenic.html?spot=jiuzhaigou">九寨沟</a></li>
+            <li><a href="scenic.html?spot=gugong">北京 · 故宫</a></li>
+            <li><a href="scenic.html?spot=sanya">三亚 · 亚龙湾</a></li>
+            <li><a href="scenic.html?spot=lijiang">丽江古城</a></li>
+          </ul>
+        </div>
+        <div class="footer-col footer-contact">
+          <h4>联系我们</h4>
+          <ul>
+            <li>📍 中国 · 某大学信息学院 Web 前端课程</li>
+            <li>📞 400-800-6666（9:00-21:00）</li>
+            <li>📧 hello@roamcity.demo</li>
+            <li>🕘 周一至周日全天在线</li>
+          </ul>
+        </div>
+      </div>
+      <div class="footer-bottom">
+        <span>© <span id="year">2026</span> 漫游城市 · 仅用于课程设计学习演示</span>
+        <span>💾 收藏/订单/留言均保存在浏览器本地，不依赖服务器</span>
+      </div>
+    </div>
+  </footer>
+
+  <button id="backtop" aria-label="回到顶部">↑</button>
+  <div id="toast" role="status"></div>
+
+  <script src="assets/js/main.js"></script>
+  <script src="assets/js/data.js"></script>
+  <script src="assets/js/booking.js"></script>
+</body>
+</html>
