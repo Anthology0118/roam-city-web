@@ -2,6 +2,12 @@
 
 纯 HTML / CSS / JavaScript 实现的多页面旅游攻略站点。无框架、无构建步骤、无后端依赖；数据内置于 JS，插画为本地 SVG，支持 `file://` 协议下直接运行。
 
+## 预览
+
+首页截图（`images/home.png`）：
+
+![首页截图](images/home.png)
+
 ## 页面
 
 | 页面 | 说明 |
