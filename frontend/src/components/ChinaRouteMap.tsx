@@ -6,11 +6,14 @@ import chinaGeoJson from "china-map-geojson/lib/china.js";
 import type { ItineraryPlan, PlanStop, Spot } from "../types";
 import {
   buildChinaTerrainGeometry,
+  classifyChinaClimate,
+  CLIMATE_LEGEND,
   elevationToWorldY,
   PROVINCE_MEAN_ELEVATION,
   PROJ_H,
   PROJ_W,
   sampleChinaElevationMeters,
+  TerrainColorMode,
   toWorldXZ,
   WORLD_SCALE,
 } from "../utils/chinaTerrain";
@@ -61,17 +64,29 @@ export function ChinaRouteMap({
   onToggleRef.current = onToggleSpot;
   onInspectRef.current = onInspectSpot;
 
-  const [hoverTerrain, setHoverTerrain] = useState<{ province: string; elevMeters: number } | null>(null);
+  const [colorMode, setColorMode] = useState<TerrainColorMode>("climate");
+  const [hoverTerrain, setHoverTerrain] = useState<{
+    province: string;
+    elevMeters: number;
+    climateLabel: string;
+  } | null>(null);
   const [hoverStop, setHoverStop] = useState<{
     id: string;
     name: string;
     city: string;
     price: number;
     elevMeters: number;
+    climateLabel: string;
     dayLabel?: string;
   } | null>(null);
   const [autoRotate, setAutoRotate] = useState(false);
   const [webglError, setWebglError] = useState(false);
+
+  const terrainColorDataRef = useRef<{
+    geometry: THREE.BufferGeometry;
+    elevationColors: Float32Array;
+    climateColors: Float32Array;
+  } | null>(null);
 
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
@@ -243,8 +258,16 @@ export function ChinaRouteMap({
     grid.position.y = -0.04;
     scene.add(grid);
 
-    // 1. Displaced 3D China Elevation Relief Terrain Mesh
-    const terrainGeo = buildChinaTerrainGeometry(chinaGeoJson, projection);
+    // 1. Displaced 3D China Elevation Relief Terrain Mesh (supports Elevation & Climate color layers)
+    const { geometry: terrainGeo, elevationColors, climateColors } = buildChinaTerrainGeometry(
+      chinaGeoJson,
+      projection
+    );
+    terrainColorDataRef.current = { geometry: terrainGeo, elevationColors, climateColors };
+    const colorAttr = terrainGeo.getAttribute("color") as THREE.BufferAttribute;
+    (colorAttr.array as Float32Array).set(colorMode === "climate" ? climateColors : elevationColors);
+    colorAttr.needsUpdate = true;
+
     const terrainMat = new THREE.MeshStandardMaterial({
       vertexColors: true,
       roughness: 0.72,
@@ -338,6 +361,7 @@ export function ChinaRouteMap({
           city: d.city,
           price: d.price,
           elevMeters: d.elevMeters,
+          climateLabel: d.climateLabel,
           dayLabel: d.dayLabel,
         });
       } else {
@@ -353,6 +377,7 @@ export function ChinaRouteMap({
         const lonLat = projection.invert([projX, projY]);
         if (lonLat) {
           const elevMeters = sampleChinaElevationMeters(lonLat[0], lonLat[1]);
+          const climateLabel = classifyChinaClimate(lonLat[0], lonLat[1], elevMeters).label;
           let prov = "";
           for (const feat of chinaGeoJson.features) {
             if (geoContains(feat, lonLat)) {
@@ -360,7 +385,7 @@ export function ChinaRouteMap({
               break;
             }
           }
-          setHoverTerrain(prov ? { province: prov, elevMeters } : null);
+          setHoverTerrain(prov ? { province: prov, elevMeters, climateLabel } : null);
           provinceLines.forEach((pl) => {
             const active = prov !== "" && pl.name === prov;
             pl.mat.color.setHex(active ? 0xfbbf24 : 0xe0f2fe);
@@ -474,11 +499,21 @@ export function ChinaRouteMap({
       renderer.dispose();
       terrainGeo.dispose();
       terrainMat.dispose();
+      terrainColorDataRef.current = null;
       if (renderer.domElement.parentNode === container) {
         container.removeChild(renderer.domElement);
       }
     };
   }, [projection, height]);
+
+  // Swap vertex color buffer on GPU (<1ms) when switching Elevation <-> Climate layer
+  useEffect(() => {
+    const data = terrainColorDataRef.current;
+    if (!data) return;
+    const attr = data.geometry.getAttribute("color") as THREE.BufferAttribute;
+    (attr.array as Float32Array).set(colorMode === "climate" ? data.climateColors : data.elevationColors);
+    attr.needsUpdate = true;
+  }, [colorMode]);
 
   // Rebuild 3D spot pillars anchored onto actual terrain elevation + parabolic Bezier arcs
   useEffect(() => {
@@ -501,6 +536,7 @@ export function ChinaRouteMap({
       if (!pt) return;
       const [wx, wz] = toWorldXZ(pt);
       const elevMeters = sampleChinaElevationMeters(s.lng, s.lat);
+      const climateLabel = classifyChinaClimate(s.lng, s.lat, elevMeters).label;
       const baseY = elevationToWorldY(elevMeters);
       const isSel = selectedSet.has(s.id);
 
@@ -522,6 +558,7 @@ export function ChinaRouteMap({
         city: s.city,
         price: s.price,
         elevMeters,
+        climateLabel,
       };
       dynamicGroup.add(pillar);
 
@@ -553,6 +590,7 @@ export function ChinaRouteMap({
         city: st.city,
         price: st.price,
         elevMeters: st.elevMeters,
+        climateLabel: classifyChinaClimate(st.lng, st.lat, st.elevMeters).label,
         dayLabel: st.dayLabel,
       };
       dynamicGroup.add(beacon);
@@ -653,11 +691,41 @@ export function ChinaRouteMap({
           }}
         >
           {hoverTerrain
-            ? `⛰️ ${hoverTerrain.province} · 光标海拔 ~${hoverTerrain.elevMeters}m${provAvg ? `（省均 ${provAvg}m）` : ""}`
-            : "⛰️ 3D 中国三级阶梯海拔地形沙盘 (Three.js · 西高东低浮雕 + 贝塞尔航线)"}
+            ? `⛰️ ${hoverTerrain.province} · 海拔 ~${hoverTerrain.elevMeters}m${provAvg ? `（省均 ${provAvg}m）` : ""} · 🌦️ ${hoverTerrain.climateLabel}`
+            : colorMode === "climate"
+              ? "🌦️ 3D 中国地形 + 气候环境沙盘 (五大气候区植被晕渲 + 三级阶梯海拔)"
+              : "⛰️ 3D 中国三级阶梯海拔地形沙盘 (Three.js · 西高东低浮雕 + 贝塞尔航线)"}
         </div>
 
-        <div style={{ display: "flex", gap: 6, pointerEvents: "auto" }}>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", pointerEvents: "auto" }}>
+          <button
+            type="button"
+            className="chip"
+            style={{
+              padding: "3px 10px",
+              fontSize: "0.76rem",
+              background: colorMode === "climate" ? "#059669" : "rgba(7, 25, 35, 0.85)",
+              color: "#ecfdf5",
+              borderColor: colorMode === "climate" ? "#34d399" : "rgba(103, 232, 249, 0.4)",
+            }}
+            onClick={() => setColorMode("climate")}
+          >
+            🌦️ 气候环境
+          </button>
+          <button
+            type="button"
+            className="chip"
+            style={{
+              padding: "3px 10px",
+              fontSize: "0.76rem",
+              background: colorMode === "elevation" ? "#b45309" : "rgba(7, 25, 35, 0.85)",
+              color: "#fef3c7",
+              borderColor: colorMode === "elevation" ? "#fbbf24" : "rgba(103, 232, 249, 0.4)",
+            }}
+            onClick={() => setColorMode("elevation")}
+          >
+            ⛰️ 海拔高度
+          </button>
           <button
             type="button"
             className="chip"
@@ -784,7 +852,7 @@ export function ChinaRouteMap({
           ))}
         </div>
 
-        {/* Hypsometric Elevation Legend Bar */}
+        {/* Dynamic Elevation / Climate Legend Box */}
         <div
           style={{
             position: "absolute",
@@ -792,7 +860,7 @@ export function ChinaRouteMap({
             bottom: 12,
             padding: "6px 10px",
             borderRadius: 8,
-            background: "rgba(7, 25, 35, 0.84)",
+            background: "rgba(7, 25, 35, 0.86)",
             border: "1px solid rgba(103, 232, 249, 0.3)",
             color: "#cbd5e1",
             fontSize: "0.68rem",
@@ -800,21 +868,45 @@ export function ChinaRouteMap({
             zIndex: 4,
           }}
         >
-          <div style={{ fontWeight: 700, color: "#e0f2fe", marginBottom: 4 }}>海拔高度（m）</div>
-          <div
-            style={{
-              width: 148,
-              height: 8,
-              borderRadius: 4,
-              background: "linear-gradient(90deg, #0e747a 0%, #1f9d76 20%, #73b458 40%, #cfa048 62%, #c26b39 80%, #e8eef5 100%)",
-            }}
-          />
-          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 2, fontSize: "0.64rem" }}>
-            <span>50</span>
-            <span>1500</span>
-            <span>3000</span>
-            <span>4600+</span>
-          </div>
+          {colorMode === "climate" ? (
+            <>
+              <div style={{ fontWeight: 700, color: "#e0f2fe", marginBottom: 4 }}>中国五大气候环境带</div>
+              <div style={{ display: "grid", gridTemplateColumns: "auto auto", gap: "3px 10px" }}>
+                {CLIMATE_LEGEND.map((item) => (
+                  <span key={item.id} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                    <span
+                      style={{
+                        width: 9,
+                        height: 9,
+                        borderRadius: 2,
+                        background: item.color,
+                        display: "inline-block",
+                      }}
+                    />
+                    {item.label}
+                  </span>
+                ))}
+              </div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontWeight: 700, color: "#e0f2fe", marginBottom: 4 }}>海拔高度（m）</div>
+              <div
+                style={{
+                  width: 148,
+                  height: 8,
+                  borderRadius: 4,
+                  background: "linear-gradient(90deg, #0e747a 0%, #1f9d76 20%, #73b458 40%, #cfa048 62%, #c26b39 80%, #e8eef5 100%)",
+                }}
+              />
+              <div style={{ display: "flex", justifyContent: "space-between", marginTop: 2, fontSize: "0.64rem" }}>
+                <span>50</span>
+                <span>1500</span>
+                <span>3000</span>
+                <span>4600+</span>
+              </div>
+            </>
+          )}
         </div>
 
         {/* South China Sea Inset */}
@@ -888,7 +980,7 @@ export function ChinaRouteMap({
         {hoverStop && (
           <div style={{ color: "#67e8f9", fontWeight: 600 }}>
             {hoverStop.dayLabel ? `[${hoverStop.dayLabel}] ` : ""}
-            {hoverStop.name} · {hoverStop.city} · 海拔 ~{hoverStop.elevMeters}m ·{" "}
+            {hoverStop.name} · {hoverStop.city} · 海拔 ~{hoverStop.elevMeters}m · {hoverStop.climateLabel} ·{" "}
             {hoverStop.price === 0 ? "免费" : `¥${hoverStop.price}`}
           </div>
         )}

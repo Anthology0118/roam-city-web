@@ -154,10 +154,66 @@ function collectCoordsBBox(geom: Geometry): [number, number, number, number] {
   return [minLng, maxLng, minLat, maxLat];
 }
 
+export type TerrainColorMode = "elevation" | "climate";
+
+export interface ClimateInfo {
+  id: "tropical" | "subtropical" | "temperate_monsoon" | "continental" | "alpine";
+  label: string;
+  color: string;
+}
+
+export const CLIMATE_LEGEND: ClimateInfo[] = [
+  { id: "tropical", label: "热带季风", color: "#059669" },
+  { id: "subtropical", label: "亚热带季风", color: "#22c55e" },
+  { id: "temperate_monsoon", label: "温带季风", color: "#84cc16" },
+  { id: "continental", label: "温带大陆性", color: "#eab308" },
+  { id: "alpine", label: "高原山地", color: "#818cf8" },
+];
+
+export function classifyChinaClimate(lng: number, lat: number, elevMeters: number): ClimateInfo {
+  // 1. Plateau / Alpine Mountain climate (Tibetan Plateau, Pamir, high Tianshan/Hengduan)
+  if (elevMeters >= 2650 || (lng < 103.5 && lat >= 27.2 && lat <= 39.0 && elevMeters >= 2050)) {
+    return CLIMATE_LEGEND[4];
+  }
+  // 2. Tropical Monsoon (Hainan, Leizhou, Xishuangbanna, Southern Taiwan)
+  const isXishuangbanna = lat <= 22.7 && lng <= 102.2;
+  const isSouthCoast = lat <= 21.7 && lng >= 106.0;
+  const isSouthTaiwan = lat <= 23.2 && lng >= 120.0;
+  if (isXishuangbanna || isSouthCoast || isSouthTaiwan) {
+    return CLIMATE_LEGEND[0];
+  }
+  // 3. Subtropical Monsoon (South of Qinling-Huaihe ~33.5N, east of Tibetan slope)
+  const qinlingLat = lng < 111 ? 32.8 : 33.8;
+  if (lat <= qinlingLat && lng >= 98.0) {
+    return CLIMATE_LEGEND[1];
+  }
+  // 4. Temperate Monsoon vs Temperate Continental along the ~400mm isohyet
+  const monsoonWestLng = 106.5 + Math.max(0, lat - 34.0) * 1.0;
+  if (lng >= monsoonWestLng) {
+    return CLIMATE_LEGEND[2];
+  }
+  return CLIMATE_LEGEND[3];
+}
+
+export function climateToColor(lng: number, lat: number, elevMeters: number): THREE.Color {
+  const info = classifyChinaClimate(lng, lat, elevMeters);
+  const c = new THREE.Color(info.color);
+  // Subtle climate sub-variations (glacier tops in alpine, lush boreal north, sandy Tarim core)
+  if (info.id === "alpine" && elevMeters > 3800) {
+    const snowT = Math.min(1, (elevMeters - 3800) / 950);
+    c.lerp(new THREE.Color("#eef4fb"), snowT);
+  } else if (info.id === "temperate_monsoon" && lat > 45.5) {
+    c.lerp(new THREE.Color("#15803d"), Math.min(0.45, (lat - 45.5) / 10));
+  } else if (info.id === "continental" && lng < 94 && lat > 37 && lat < 42.5) {
+    c.lerp(new THREE.Color("#f59e0b"), 0.55); // Tarim / Taklamakan desert warmth
+  }
+  return c;
+}
+
 export function buildChinaTerrainGeometry(
   geoJson: FeatureCollection,
   projection: ReturnType<typeof geoMercator>
-): THREE.BufferGeometry {
+): { geometry: THREE.BufferGeometry; elevationColors: Float32Array; climateColors: Float32Array } {
   const bboxFeatures: BBoxFeature[] = geoJson.features.map((feature) => {
     const [minLng, maxLng, minLat, maxLat] = collectCoordsBBox(feature.geometry);
     return { feature, minLng, maxLng, minLat, maxLat };
@@ -184,7 +240,8 @@ export function buildChinaTerrainGeometry(
     wx: number;
     wy: number;
     wz: number;
-    color: THREE.Color;
+    elevColor: THREE.Color;
+    climColor: THREE.Color;
   }
 
   const nodes: GridNode[][] = [];
@@ -197,7 +254,13 @@ export function buildChinaTerrainGeometry(
       const [wx, wz] = toWorldXZ(pt);
       const elev = sampleChinaElevationMeters(lng, lat);
       const wy = elevationToWorldY(elev);
-      rowArr.push({ wx, wy, wz, color: elevationToColor(elev) });
+      rowArr.push({
+        wx,
+        wy,
+        wz,
+        elevColor: elevationToColor(elev),
+        climColor: climateToColor(lng, lat, elev),
+      });
     }
     nodes.push(rowArr);
   }
@@ -211,25 +274,46 @@ export function buildChinaTerrainGeometry(
   );
 
   const positions: number[] = [];
-  const colors: number[] = [];
+  const elevColors: number[] = [];
+  const climColors: number[] = [];
 
   const pushTri = (a: GridNode, b: GridNode, d: GridNode) => {
     positions.push(a.wx, a.wy, a.wz, b.wx, b.wy, b.wz, d.wx, d.wy, d.wz);
-    colors.push(a.color.r, a.color.g, a.color.b, b.color.r, b.color.g, b.color.b, d.color.r, d.color.g, d.color.b);
+    elevColors.push(
+      a.elevColor.r, a.elevColor.g, a.elevColor.b,
+      b.elevColor.r, b.elevColor.g, b.elevColor.b,
+      d.elevColor.r, d.elevColor.g, d.elevColor.b
+    );
+    climColors.push(
+      a.climColor.r, a.climColor.g, a.climColor.b,
+      b.climColor.r, b.climColor.g, b.climColor.b,
+      d.climColor.r, d.climColor.g, d.climColor.b
+    );
   };
 
   const skirtColor = new THREE.Color("#0c3b46");
   const pushSkirt = (a: GridNode, b: GridNode) => {
     positions.push(a.wx, 0, a.wz, a.wx, a.wy, a.wz, b.wx, b.wy, b.wz);
-    colors.push(
+    elevColors.push(
       skirtColor.r, skirtColor.g, skirtColor.b,
-      a.color.r * 0.72, a.color.g * 0.72, a.color.b * 0.72,
-      b.color.r * 0.72, b.color.g * 0.72, b.color.b * 0.72
+      a.elevColor.r * 0.72, a.elevColor.g * 0.72, a.elevColor.b * 0.72,
+      b.elevColor.r * 0.72, b.elevColor.g * 0.72, b.elevColor.b * 0.72
     );
-    positions.push(a.wx, 0, a.wz, b.wx, b.wy, b.wz, b.wx, 0, b.wz);
-    colors.push(
+    climColors.push(
       skirtColor.r, skirtColor.g, skirtColor.b,
-      b.color.r * 0.72, b.color.g * 0.72, b.color.b * 0.72,
+      a.climColor.r * 0.72, a.climColor.g * 0.72, a.climColor.b * 0.72,
+      b.climColor.r * 0.72, b.climColor.g * 0.72, b.climColor.b * 0.72
+    );
+
+    positions.push(a.wx, 0, a.wz, b.wx, b.wy, b.wz, b.wx, 0, b.wz);
+    elevColors.push(
+      skirtColor.r, skirtColor.g, skirtColor.b,
+      b.elevColor.r * 0.72, b.elevColor.g * 0.72, b.elevColor.b * 0.72,
+      skirtColor.r, skirtColor.g, skirtColor.b
+    );
+    climColors.push(
+      skirtColor.r, skirtColor.g, skirtColor.b,
+      b.climColor.r * 0.72, b.climColor.g * 0.72, b.climColor.b * 0.72,
       skirtColor.r, skirtColor.g, skirtColor.b
     );
   };
@@ -242,11 +326,9 @@ export function buildChinaTerrainGeometry(
       const n01 = nodes[r + 1][c];
       const n11 = nodes[r + 1][c + 1];
 
-      // Upward-facing winding (CCW looking from +Y; note lat increases northward => smaller z)
       pushTri(n00, n10, n11);
       pushTri(n00, n11, n01);
 
-      // Add vertical relief cliff walls on exterior land edges
       if (r === 0 || !cellInside[r - 1][c]) pushSkirt(n00, n10);
       if (r === rows - 1 || !cellInside[r + 1][c]) pushSkirt(n11, n01);
       if (c === 0 || !cellInside[r][c - 1]) pushSkirt(n01, n00);
@@ -255,8 +337,10 @@ export function buildChinaTerrainGeometry(
   }
 
   const geometry = new THREE.BufferGeometry();
+  const elevationColors = new Float32Array(elevColors);
+  const climateColors = new Float32Array(climColors);
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
-  geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  geometry.setAttribute("color", new THREE.BufferAttribute(new Float32Array(elevationColors), 3));
   geometry.computeVertexNormals();
-  return geometry;
+  return { geometry, elevationColors, climateColors };
 }
