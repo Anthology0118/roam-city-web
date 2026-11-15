@@ -336,17 +336,17 @@ async def stream_travel_agent(
             names = " → ".join(f"{st['name']}（¥{st['price']} / {st['duration_hours']}h）" for st in d["stops"])
             day_lines.append(f"- **{d['day']}**（约 {d['total_hours']} 小时）：{names}")
         cite_note = (
-            f"结合站内攻略建议：{citations[0]['section_title']}——{citations[0]['content'][:75]}… [1]"
+            f"> **站内攻略避坑参考（{citations[0]['section_title']}）**：{citations[0]['content'][:90]}… [1]"
             if citations
             else ""
         )
         ctx_prefix = f"已结合第 {len(history_turns) // 2} 轮对话偏好更新方案：\n\n" if history_turns else ""
         narrative = (
             ctx_prefix
-            + f"为您完成 **{intent['days']} 日** 确定性行程求解（共计门票 **¥{plan['total_ticket_cost']}**，"
-            f"2-opt 优化后跨站距离 **{plan['optimized_distance_km']} km**"
+            + f"### {intent['days']} 日确定性行程方案\n\n"
+            + f"共计门票 **¥{plan['total_ticket_cost']}**，2-opt 优化后跨站距离 **{plan['optimized_distance_km']} km**"
             + (f"，较贪心基线减少绕行 **{plan['distance_saved_km']} km**" if plan["distance_saved_km"] > 0 else "")
-            + "）：\n\n"
+            + "：\n\n"
             + "\n".join(day_lines)
             + (f"\n\n{cite_note}" if cite_note else "")
         )

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { streamAgentChat } from "../api/client";
 import type { BookingDraft, CitationItem, ItineraryPlan } from "../types";
 import { ChinaRouteMap } from "./ChinaRouteMap";
+import { MarkdownView } from "./MarkdownView";
 
 interface Props {
   onApplyBookingDraft: (draft: BookingDraft) => void;
@@ -163,7 +164,9 @@ export function AgentPlanner({ onApplyBookingDraft }: Props) {
                 }}
               >
                 <strong>{m.role === "user" ? "你：" : "Agent："}</strong>
-                {m.text.length > 140 ? `${m.text.slice(0, 140)}...` : m.text}
+                {m.text.replace(/\*\*/g, "").length > 140
+                  ? `${m.text.replace(/\*\*/g, "").slice(0, 140)}...`
+                  : m.text.replace(/\*\*/g, "")}
               </div>
             ))}
           </div>
@@ -193,9 +196,10 @@ export function AgentPlanner({ onApplyBookingDraft }: Props) {
               ))}
             </div>
           )}
-          <div style={{ whiteSpace: "pre-wrap", fontSize: "0.95rem", minHeight: 120 }}>
-            {answer || "点击上方「生成 AI 行程」，观察多阶段 SSE 事件流与溯源解读。"}
-          </div>
+          <MarkdownView
+            content={answer}
+            placeholder="点击上方「生成 AI 行程」，观察多阶段 SSE 事件流与溯源解读。"
+          />
 
           {citations.length > 0 && (
             <div style={{ marginTop: 18, borderTop: "1px solid var(--line)", paddingTop: 14 }}>

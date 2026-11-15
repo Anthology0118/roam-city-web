@@ -1,9 +1,19 @@
-import { geoMercator } from "d3-geo";
+import { geoContains, geoMercator } from "d3-geo";
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import chinaGeoJson from "china-map-geojson/lib/china.js";
 import type { ItineraryPlan, PlanStop, Spot } from "../types";
+import {
+  buildChinaTerrainGeometry,
+  elevationToWorldY,
+  PROVINCE_MEAN_ELEVATION,
+  PROJ_H,
+  PROJ_W,
+  sampleChinaElevationMeters,
+  toWorldXZ,
+  WORLD_SCALE,
+} from "../utils/chinaTerrain";
 
 interface ChinaRouteMapProps {
   spots?: Spot[];
@@ -15,11 +25,6 @@ interface ChinaRouteMapProps {
 }
 
 const DAY_COLORS = ["#f97316", "#22d3ee", "#60a5fa", "#c084fc", "#34d399", "#fbbf24", "#fb7185"];
-const PROJ_W = 860;
-const PROJ_H = 640;
-const WORLD_SCALE = 0.1;
-const MAP_DEPTH = 1.9;
-const SURFACE_Y = MAP_DEPTH + 0.24;
 
 type OrderedStop = PlanStop & {
   seq: number;
@@ -27,7 +32,9 @@ type OrderedStop = PlanStop & {
   dayLabel: string;
   color: string;
   wx: number;
+  wy: number;
   wz: number;
+  elevMeters: number;
 };
 
 interface OverlayItem {
@@ -37,47 +44,6 @@ interface OverlayItem {
   seq?: number;
   label: string;
   color: string;
-}
-
-function toWorldXZ(pt: [number, number]): [number, number] {
-  return [(pt[0] - PROJ_W / 2) * WORLD_SCALE, (pt[1] - PROJ_H / 2) * WORLD_SCALE];
-}
-
-function ringToPoints(ring: number[][], projection: ReturnType<typeof geoMercator>): [number, number][] {
-  const pts: [number, number][] = [];
-  for (const coord of ring) {
-    const projected = projection([coord[0], coord[1]]);
-    if (!projected) continue;
-    const [wx, wz] = toWorldXZ(projected);
-    // In local XY before rotateX(-PI/2): sy = -wz
-    pts.push([wx, -wz]);
-  }
-  return pts;
-}
-
-function polygonToShape(rings: number[][][], projection: ReturnType<typeof geoMercator>): THREE.Shape | null {
-  if (!rings.length) return null;
-  const outer = ringToPoints(rings[0], projection);
-  if (outer.length < 3) return null;
-  const shape = new THREE.Shape();
-  shape.moveTo(outer[0][0], outer[0][1]);
-  for (let i = 1; i < outer.length; i++) {
-    shape.lineTo(outer[i][0], outer[i][1]);
-  }
-  shape.closePath();
-
-  for (let h = 1; h < rings.length; h++) {
-    const holePts = ringToPoints(rings[h], projection);
-    if (holePts.length < 3) continue;
-    const path = new THREE.Path();
-    path.moveTo(holePts[0][0], holePts[0][1]);
-    for (let i = 1; i < holePts.length; i++) {
-      path.lineTo(holePts[i][0], holePts[i][1]);
-    }
-    path.closePath();
-    shape.holes.push(path);
-  }
-  return shape;
 }
 
 export function ChinaRouteMap({
@@ -95,12 +61,13 @@ export function ChinaRouteMap({
   onToggleRef.current = onToggleSpot;
   onInspectRef.current = onInspectSpot;
 
-  const [hoverProvince, setHoverProvince] = useState("");
+  const [hoverTerrain, setHoverTerrain] = useState<{ province: string; elevMeters: number } | null>(null);
   const [hoverStop, setHoverStop] = useState<{
     id: string;
     name: string;
     city: string;
     price: number;
+    elevMeters: number;
     dayLabel?: string;
   } | null>(null);
   const [autoRotate, setAutoRotate] = useState(false);
@@ -133,6 +100,8 @@ export function ChinaRouteMap({
         const pt = projection([st.lng, st.lat]);
         if (!pt) return;
         const [wx, wz] = toWorldXZ(pt);
+        const elevMeters = sampleChinaElevationMeters(st.lng, st.lat);
+        const wy = elevationToWorldY(elevMeters);
         list.push({
           ...st,
           seq: seq++,
@@ -140,14 +109,15 @@ export function ChinaRouteMap({
           dayLabel: d.day,
           color,
           wx,
+          wy,
           wz,
+          elevMeters,
         });
       });
     });
     return list;
   }, [plan, projection]);
 
-  // Projected label items & 3D Bezier curves derived from current plan + spots
   const { overlayItems, routeLegs } = useMemo(() => {
     const items: OverlayItem[] = [];
     const legs: Array<{ curve: THREE.QuadraticBezierCurve3; color: string }> = [];
@@ -155,7 +125,7 @@ export function ChinaRouteMap({
     orderedStops.forEach((st, idx) => {
       items.push({
         key: `stop-${st.spot_id}`,
-        worldPos: new THREE.Vector3(st.wx, SURFACE_Y + 4.3, st.wz),
+        worldPos: new THREE.Vector3(st.wx, st.wy + 3.9, st.wz),
         kind: "stop",
         seq: st.seq,
         label: st.name.split(" · ")[0],
@@ -164,10 +134,13 @@ export function ChinaRouteMap({
 
       if (idx > 0) {
         const prev = orderedStops[idx - 1];
-        const p0 = new THREE.Vector3(prev.wx, SURFACE_Y + 0.6, prev.wz);
-        const p1 = new THREE.Vector3(st.wx, SURFACE_Y + 0.6, st.wz);
+        const p0 = new THREE.Vector3(prev.wx, prev.wy + 0.5, prev.wz);
+        const p1 = new THREE.Vector3(st.wx, st.wy + 0.5, st.wz);
         const dist = p0.distanceTo(p1);
-        const arcPeak = SURFACE_Y + Math.min(18, Math.max(3.6, dist * 0.34));
+        const midLng = (prev.lng + st.lng) / 2;
+        const midLat = (prev.lat + st.lat) / 2;
+        const midTerrainY = elevationToWorldY(sampleChinaElevationMeters(midLng, midLat));
+        const arcPeak = Math.max(p0.y, p1.y, midTerrainY) + Math.min(14, Math.max(3.4, dist * 0.28));
         const pMid = new THREE.Vector3((p0.x + p1.x) / 2, arcPeak, (p0.z + p1.z) / 2);
         const curve = new THREE.QuadraticBezierCurve3(p0, pMid, p1);
         legs.push({ curve, color: st.color });
@@ -175,7 +148,7 @@ export function ChinaRouteMap({
         if (st.distance_from_prev_km > 0) {
           items.push({
             key: `leg-${prev.spot_id}-${st.spot_id}`,
-            worldPos: curve.getPoint(0.5).add(new THREE.Vector3(0, 1.1, 0)),
+            worldPos: curve.getPoint(0.5).add(new THREE.Vector3(0, 1.0, 0)),
             kind: "leg",
             label: `${Math.round(st.distance_from_prev_km)}km`,
             color: st.color,
@@ -191,9 +164,10 @@ export function ChinaRouteMap({
         const pt = projection([s.lng, s.lat]);
         if (!pt) return;
         const [wx, wz] = toWorldXZ(pt);
+        const wy = elevationToWorldY(sampleChinaElevationMeters(s.lng, s.lat));
         items.push({
           key: `sel-${s.id}`,
-          worldPos: new THREE.Vector3(wx, SURFACE_Y + 2.8, wz),
+          worldPos: new THREE.Vector3(wx, wy + 2.7, wz),
           kind: "selected",
           label: s.name.split(" · ")[0],
           color: "#f97316",
@@ -208,15 +182,13 @@ export function ChinaRouteMap({
   overlayRef.current = overlayItems;
 
   const sceneRefs = useRef<{
-    scene: THREE.Scene;
-    provinceMeshes: THREE.Mesh[];
     dynamicGroup: THREE.Group;
     pulseRings: THREE.Mesh[];
     comet: THREE.Mesh;
     legs: Array<{ curve: THREE.QuadraticBezierCurve3; color: string }>;
   } | null>(null);
 
-  // Initialize Three.js WebGL stage + extruded 34-province China mesh once
+  // Initialize Three.js WebGL 3D relief terrain + draped province borders once
   useEffect(() => {
     const container = mountRef.current;
     if (!container) return;
@@ -240,7 +212,7 @@ export function ChinaRouteMap({
     const scene = new THREE.Scene();
 
     const camera = new THREE.PerspectiveCamera(40, w / h, 0.5, 500);
-    camera.position.set(0, 56, 54);
+    camera.position.set(4, 54, 56);
     cameraRef.current = camera;
 
     const controls = new OrbitControls(camera, renderer.domElement);
@@ -249,38 +221,47 @@ export function ChinaRouteMap({
     controls.maxPolarAngle = Math.PI * 0.47;
     controls.minPolarAngle = 0.08;
     controls.minDistance = 24;
-    controls.maxDistance = 135;
-    controls.target.set(0, 1.5, 2);
+    controls.maxDistance = 138;
+    controls.target.set(0, 2.5, 2);
     controls.update();
     controlsRef.current = controls;
 
-    // Studio & GIS lighting
-    scene.add(new THREE.AmbientLight(0xd8f3f8, 1.25));
-    const keyLight = new THREE.DirectionalLight(0xffffff, 1.45);
-    keyLight.position.set(35, 75, 40);
-    keyLight.castShadow = true;
-    keyLight.shadow.mapSize.set(1024, 1024);
-    scene.add(keyLight);
+    // Directional alpine sunlight + cool skylight fill so ridges cast natural relief shading
+    scene.add(new THREE.AmbientLight(0xdaf4f8, 1.0));
+    const sunLight = new THREE.DirectionalLight(0xfff7ed, 1.85);
+    sunLight.position.set(48, 72, 34);
+    sunLight.castShadow = true;
+    sunLight.shadow.mapSize.set(1024, 1024);
+    scene.add(sunLight);
 
-    const rimLight = new THREE.DirectionalLight(0x38bdf8, 0.75);
-    rimLight.position.set(-45, 32, -40);
+    const rimLight = new THREE.DirectionalLight(0x38bdf8, 0.72);
+    rimLight.position.set(-55, 36, -42);
     scene.add(rimLight);
 
-    // Subtle spatial coordinate grid beneath China landmass
-    const grid = new THREE.GridHelper(130, 26, 0x1e6073, 0x113643);
-    grid.position.y = -0.05;
+    // Spatial coordinate reference grid
+    const grid = new THREE.GridHelper(132, 26, 0x1e6073, 0x0f303c);
+    grid.position.y = -0.04;
     scene.add(grid);
 
-    // Extrude 34 China provinces
-    const mapGroup = new THREE.Group();
-    const provinceMeshes: THREE.Mesh[] = [];
-    const baseColor = new THREE.Color(0x165363);
-    const altColor = new THREE.Color(0x195e70);
+    // 1. Displaced 3D China Elevation Relief Terrain Mesh
+    const terrainGeo = buildChinaTerrainGeometry(chinaGeoJson, projection);
+    const terrainMat = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.72,
+      metalness: 0.08,
+      flatShading: false,
+      side: THREE.DoubleSide,
+    });
+    const terrainMesh = new THREE.Mesh(terrainGeo, terrainMat);
+    terrainMesh.castShadow = true;
+    terrainMesh.receiveShadow = true;
+    scene.add(terrainMesh);
 
-    chinaGeoJson.features.forEach((feat, idx) => {
+    // 2. Draped provincial border lines resting directly on top of the terrain elevation
+    const provinceLines: Array<{ name: string; line: THREE.Line; mat: THREE.LineBasicMaterial }> = [];
+    chinaGeoJson.features.forEach((feat) => {
       const geom = feat.geometry;
       const provName = feat.properties?.name || "";
-      const shapes: THREE.Shape[] = [];
       const polygons =
         geom.type === "Polygon"
           ? [geom.coordinates as number[][][]]
@@ -289,76 +270,45 @@ export function ChinaRouteMap({
             : [];
 
       for (const poly of polygons) {
-        const shape = polygonToShape(poly, projection);
-        if (shape) shapes.push(shape);
-      }
-      if (!shapes.length) return;
-
-      const geo = new THREE.ExtrudeGeometry(shapes, {
-        depth: MAP_DEPTH,
-        bevelEnabled: true,
-        bevelThickness: 0.22,
-        bevelSize: 0.16,
-        bevelSegments: 2,
-        curveSegments: 2,
-      });
-      geo.rotateX(-Math.PI / 2);
-
-      const mat = new THREE.MeshStandardMaterial({
-        color: idx % 2 === 0 ? baseColor.clone() : altColor.clone(),
-        roughness: 0.52,
-        metalness: 0.18,
-      });
-
-      const mesh = new THREE.Mesh(geo, mat);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      mesh.userData = { kind: "province", name: provName, baseHex: mat.color.getHex(), targetY: 0 };
-      mapGroup.add(mesh);
-      provinceMeshes.push(mesh);
-
-      // Crisp border outline on the top face
-      for (const poly of polygons) {
         const ring = poly[0];
         if (!ring || ring.length < 3) continue;
-        const borderPts: THREE.Vector3[] = [];
+        const pts: THREE.Vector3[] = [];
         for (const coord of ring) {
           const p = projection([coord[0], coord[1]]);
           if (!p) continue;
           const [wx, wz] = toWorldXZ(p);
-          borderPts.push(new THREE.Vector3(wx, SURFACE_Y + 0.03, wz));
+          const wy = elevationToWorldY(sampleChinaElevationMeters(coord[0], coord[1])) + 0.08;
+          pts.push(new THREE.Vector3(wx, wy, wz));
         }
-        if (borderPts.length > 2) {
-          borderPts.push(borderPts[0].clone());
-          const lineGeo = new THREE.BufferGeometry().setFromPoints(borderPts);
-          const lineMat = new THREE.LineBasicMaterial({ color: 0x67e8f9, transparent: true, opacity: 0.58 });
-          mapGroup.add(new THREE.Line(lineGeo, lineMat));
+        if (pts.length > 2) {
+          pts.push(pts[0].clone());
+          const lineGeo = new THREE.BufferGeometry().setFromPoints(pts);
+          const lineMat = new THREE.LineBasicMaterial({ color: 0xe0f2fe, transparent: true, opacity: 0.48 });
+          const line = new THREE.Line(lineGeo, lineMat);
+          scene.add(line);
+          provinceLines.push({ name: provName, line, mat: lineMat });
         }
       }
     });
-    scene.add(mapGroup);
 
     const dynamicGroup = new THREE.Group();
     scene.add(dynamicGroup);
 
-    // Animated comet traversing the active 2-opt route
     const comet = new THREE.Mesh(
-      new THREE.SphereGeometry(0.65, 16, 16),
+      new THREE.SphereGeometry(0.62, 16, 16),
       new THREE.MeshBasicMaterial({ color: 0xffffff })
     );
     comet.visible = false;
     scene.add(comet);
 
     sceneRefs.current = {
-      scene,
-      provinceMeshes,
       dynamicGroup,
       pulseRings: [],
       comet,
       legs: [],
     };
 
-    // Raycaster for province & 3D beacon hover/click
+    // Raycaster over spots + 3D relief terrain (exact geo inverse lookup avoids parallax drift)
     const raycaster = new THREE.Raycaster();
     const pointer = new THREE.Vector2();
     let downPos = { x: 0, y: 0 };
@@ -382,31 +332,53 @@ export function ChinaRouteMap({
       if (hitSpotObj) {
         const d = hitSpotObj.object.userData;
         renderer.domElement.style.cursor = "pointer";
-        setHoverStop({ id: d.spotId, name: d.name, city: d.city, price: d.price, dayLabel: d.dayLabel });
+        setHoverStop({
+          id: d.spotId,
+          name: d.name,
+          city: d.city,
+          price: d.price,
+          elevMeters: d.elevMeters,
+          dayLabel: d.dayLabel,
+        });
       } else {
         setHoverStop(null);
+        renderer.domElement.style.cursor = "grab";
       }
 
-      const provHits = raycaster.intersectObjects(provinceMeshes, false);
-      const hitProv = provHits[0]?.object as THREE.Mesh | undefined;
-      provinceMeshes.forEach((pm) => {
-        const isHit = pm === hitProv;
-        pm.userData.targetY = isHit ? 0.65 : 0;
-        const m = pm.material as THREE.MeshStandardMaterial;
-        m.color.setHex(isHit ? 0x248ea6 : pm.userData.baseHex);
-      });
-      if (hitProv) {
-        setHoverProvince(hitProv.userData.name || "");
-        if (!hitSpotObj) renderer.domElement.style.cursor = "grab";
-      } else {
-        setHoverProvince("");
-        if (!hitSpotObj) renderer.domElement.style.cursor = "grab";
+      const terrainHits = raycaster.intersectObject(terrainMesh, false);
+      if (terrainHits.length > 0 && projection.invert) {
+        const p3 = terrainHits[0].point;
+        const projX = p3.x / WORLD_SCALE + PROJ_W / 2;
+        const projY = p3.z / WORLD_SCALE + PROJ_H / 2;
+        const lonLat = projection.invert([projX, projY]);
+        if (lonLat) {
+          const elevMeters = sampleChinaElevationMeters(lonLat[0], lonLat[1]);
+          let prov = "";
+          for (const feat of chinaGeoJson.features) {
+            if (geoContains(feat, lonLat)) {
+              prov = feat.properties?.name || "";
+              break;
+            }
+          }
+          setHoverTerrain(prov ? { province: prov, elevMeters } : null);
+          provinceLines.forEach((pl) => {
+            const active = prov !== "" && pl.name === prov;
+            pl.mat.color.setHex(active ? 0xfbbf24 : 0xe0f2fe);
+            pl.mat.opacity = active ? 0.95 : 0.42;
+          });
+          return;
+        }
       }
+      setHoverTerrain(null);
+      provinceLines.forEach((pl) => {
+        pl.mat.color.setHex(0xe0f2fe);
+        pl.mat.opacity = 0.48;
+      });
     }
 
     function onPointerUp(e: PointerEvent) {
       const moved = Math.hypot(e.clientX - downPos.x, e.clientY - downPos.y);
-      if (moved > 6) return; // Ignore orbit drag
+      if (moved > 6) return;
       updatePointer(e);
       raycaster.setFromCamera(pointer, camera);
       const hits = raycaster.intersectObjects(dynamicGroup.children, true);
@@ -448,12 +420,6 @@ export function ChinaRouteMap({
       controls.autoRotateSpeed = 0.85;
       controls.update();
 
-      // Smoothly lift hovered province
-      for (const pm of provinceMeshes) {
-        pm.position.y += (pm.userData.targetY - pm.position.y) * 0.16;
-      }
-
-      // Pulse beacon rings
       const activeRefs = sceneRefs.current;
       if (activeRefs) {
         activeRefs.pulseRings.forEach((ring, idx) => {
@@ -461,7 +427,6 @@ export function ChinaRouteMap({
           ring.scale.set(s, s, 1);
         });
 
-        // Animate route comet across legs
         if (activeRefs.legs.length > 0) {
           activeRefs.comet.visible = true;
           const totalDuration = activeRefs.legs.length * 1.4;
@@ -478,7 +443,6 @@ export function ChinaRouteMap({
 
       renderer.render(scene, camera);
 
-      // Project 3D anchor coordinates into crisp 2D DOM label overlays
       const cw = container?.clientWidth || 0;
       const ch = container?.clientHeight || 0;
       if (cw > 0 && ch > 0) {
@@ -508,21 +472,22 @@ export function ChinaRouteMap({
       renderer.domElement.removeEventListener("pointerup", onPointerUp);
       controls.dispose();
       renderer.dispose();
+      terrainGeo.dispose();
+      terrainMat.dispose();
       if (renderer.domElement.parentNode === container) {
         container.removeChild(renderer.domElement);
       }
     };
   }, [projection, height]);
 
-  // Rebuild 3D spot pillars & parabolic route tubes when spots / selected / plan changes
+  // Rebuild 3D spot pillars anchored onto actual terrain elevation + parabolic Bezier arcs
   useEffect(() => {
     const refs = sceneRefs.current;
     if (!refs) return;
     const { dynamicGroup } = refs;
 
     while (dynamicGroup.children.length > 0) {
-      const child = dynamicGroup.children[0];
-      dynamicGroup.remove(child);
+      dynamicGroup.remove(dynamicGroup.children[0]);
     }
     refs.pulseRings = [];
     refs.legs = routeLegs;
@@ -530,15 +495,16 @@ export function ChinaRouteMap({
     const activeIds = new Set(orderedStops.map((s) => s.spot_id));
     const selectedSet = new Set(selectedSpotIds);
 
-    // 1. Background / selected spots
     spots.forEach((s) => {
       if (activeIds.has(s.id)) return;
       const pt = projection([s.lng, s.lat]);
       if (!pt) return;
       const [wx, wz] = toWorldXZ(pt);
+      const elevMeters = sampleChinaElevationMeters(s.lng, s.lat);
+      const baseY = elevationToWorldY(elevMeters);
       const isSel = selectedSet.has(s.id);
 
-      const h = isSel ? 2.1 : 0.9;
+      const h = isSel ? 2.2 : 0.95;
       const pillar = new THREE.Mesh(
         new THREE.CylinderGeometry(isSel ? 0.34 : 0.22, isSel ? 0.42 : 0.28, h, 14),
         new THREE.MeshStandardMaterial({
@@ -547,7 +513,7 @@ export function ChinaRouteMap({
           emissiveIntensity: 0.45,
         })
       );
-      pillar.position.set(wx, SURFACE_Y + h / 2, wz);
+      pillar.position.set(wx, baseY + h / 2, wz);
       pillar.userData = {
         kind: "spot",
         planned: false,
@@ -555,21 +521,21 @@ export function ChinaRouteMap({
         name: s.name,
         city: s.city,
         price: s.price,
+        elevMeters,
       };
       dynamicGroup.add(pillar);
 
       const cap = new THREE.Mesh(
-        new THREE.SphereGeometry(isSel ? 0.5 : 0.32, 12, 12),
+        new THREE.SphereGeometry(isSel ? 0.48 : 0.32, 12, 12),
         new THREE.MeshBasicMaterial({ color: isSel ? 0xfdba74 : 0x99f6e4 })
       );
-      cap.position.set(wx, SURFACE_Y + h + 0.15, wz);
+      cap.position.set(wx, baseY + h + 0.15, wz);
       cap.userData = pillar.userData;
       dynamicGroup.add(cap);
     });
 
-    // 2. Active 2-opt route stops (tall glowing beacons + pulsing rings)
     orderedStops.forEach((st) => {
-      const h = 3.2;
+      const h = 3.0;
       const beacon = new THREE.Mesh(
         new THREE.CylinderGeometry(0.42, 0.55, h, 16),
         new THREE.MeshStandardMaterial({
@@ -578,7 +544,7 @@ export function ChinaRouteMap({
           emissiveIntensity: 0.55,
         })
       );
-      beacon.position.set(st.wx, SURFACE_Y + h / 2, st.wz);
+      beacon.position.set(st.wx, st.wy + h / 2, st.wz);
       beacon.userData = {
         kind: "spot",
         planned: true,
@@ -586,31 +552,31 @@ export function ChinaRouteMap({
         name: st.name,
         city: st.city,
         price: st.price,
+        elevMeters: st.elevMeters,
         dayLabel: st.dayLabel,
       };
       dynamicGroup.add(beacon);
 
       const head = new THREE.Mesh(
-        new THREE.SphereGeometry(0.65, 16, 16),
+        new THREE.SphereGeometry(0.62, 16, 16),
         new THREE.MeshBasicMaterial({ color: 0xffffff })
       );
-      head.position.set(st.wx, SURFACE_Y + h + 0.25, st.wz);
+      head.position.set(st.wx, st.wy + h + 0.25, st.wz);
       head.userData = beacon.userData;
       dynamicGroup.add(head);
 
       const ring = new THREE.Mesh(
         new THREE.RingGeometry(0.8, 1.15, 24),
-        new THREE.MeshBasicMaterial({ color: st.color, side: THREE.DoubleSide, transparent: true, opacity: 0.78 })
+        new THREE.MeshBasicMaterial({ color: st.color, side: THREE.DoubleSide, transparent: true, opacity: 0.82 })
       );
       ring.rotation.x = -Math.PI / 2;
-      ring.position.set(st.wx, SURFACE_Y + 0.06, st.wz);
+      ring.position.set(st.wx, st.wy + 0.12, st.wz);
       dynamicGroup.add(ring);
       refs.pulseRings.push(ring);
     });
 
-    // 3. 3D Parabolic Bezier Tubes
     routeLegs.forEach((leg) => {
-      const tubeGeo = new THREE.TubeGeometry(leg.curve, 36, 0.22, 8, false);
+      const tubeGeo = new THREE.TubeGeometry(leg.curve, 38, 0.22, 8, false);
       const tubeMat = new THREE.MeshStandardMaterial({
         color: leg.color,
         emissive: leg.color,
@@ -626,11 +592,11 @@ export function ChinaRouteMap({
     const ctrl = controlsRef.current;
     if (!cam || !ctrl) return;
     if (mode === "3d") {
-      cam.position.set(0, 56, 54);
+      cam.position.set(4, 54, 56);
     } else {
-      cam.position.set(0, 82, 0.01);
+      cam.position.set(0, 84, 0.01);
     }
-    ctrl.target.set(0, 1.5, 2);
+    ctrl.target.set(0, 2.5, 2);
     ctrl.update();
   }
 
@@ -642,10 +608,12 @@ export function ChinaRouteMap({
     offset.multiplyScalar(factor);
     const len = offset.length();
     if (len < 22) offset.setLength(22);
-    if (len > 135) offset.setLength(135);
+    if (len > 138) offset.setLength(138);
     cam.position.copy(ctrl.target).add(offset);
     ctrl.update();
   }
+
+  const provAvg = hoverTerrain ? PROVINCE_MEAN_ELEVATION[hoverTerrain.province] : undefined;
 
   return (
     <div
@@ -675,8 +643,8 @@ export function ChinaRouteMap({
       >
         <div
           style={{
-            background: "rgba(7, 25, 35, 0.85)",
-            border: "1px solid rgba(103, 232, 249, 0.35)",
+            background: "rgba(7, 25, 35, 0.86)",
+            border: "1px solid rgba(103, 232, 249, 0.38)",
             borderRadius: 999,
             padding: "4px 12px",
             fontSize: "0.78rem",
@@ -684,7 +652,9 @@ export function ChinaRouteMap({
             fontWeight: 600,
           }}
         >
-          {hoverProvince ? `📍 ${hoverProvince}` : "🌐 3D 中国地形路线沙盘 (Three.js · 拖拽旋转 / 滚轮缩放)"}
+          {hoverTerrain
+            ? `⛰️ ${hoverTerrain.province} · 光标海拔 ~${hoverTerrain.elevMeters}m${provAvg ? `（省均 ${provAvg}m）` : ""}`
+            : "⛰️ 3D 中国三级阶梯海拔地形沙盘 (Three.js · 西高东低浮雕 + 贝塞尔航线)"}
         </div>
 
         <div style={{ display: "flex", gap: 6, pointerEvents: "auto" }}>
@@ -778,11 +748,11 @@ export function ChinaRouteMap({
               textAlign: "center",
             }}
           >
-            当前浏览器环境未开启 WebGL 硬件加速，请启用 WebGL 后查看 3D 中国地图沙盘。
+            当前浏览器环境未开启 WebGL 硬件加速，请启用 WebGL 后查看 3D 中国地形沙盘。
           </div>
         )}
 
-        {/* Crisp HTML labels projected from 3D world positions */}
+        {/* Crisp HTML labels projected from 3D anchor coordinates */}
         <div style={{ position: "absolute", inset: 0, pointerEvents: "none", overflow: "hidden", zIndex: 3 }}>
           {overlayItems.map((item) => (
             <div
@@ -812,6 +782,39 @@ export function ChinaRouteMap({
               <span>{item.label}</span>
             </div>
           ))}
+        </div>
+
+        {/* Hypsometric Elevation Legend Bar */}
+        <div
+          style={{
+            position: "absolute",
+            left: 12,
+            bottom: 12,
+            padding: "6px 10px",
+            borderRadius: 8,
+            background: "rgba(7, 25, 35, 0.84)",
+            border: "1px solid rgba(103, 232, 249, 0.3)",
+            color: "#cbd5e1",
+            fontSize: "0.68rem",
+            pointerEvents: "none",
+            zIndex: 4,
+          }}
+        >
+          <div style={{ fontWeight: 700, color: "#e0f2fe", marginBottom: 4 }}>海拔高度（m）</div>
+          <div
+            style={{
+              width: 148,
+              height: 8,
+              borderRadius: 4,
+              background: "linear-gradient(90deg, #0e747a 0%, #1f9d76 20%, #73b458 40%, #cfa048 62%, #c26b39 80%, #e8eef5 100%)",
+            }}
+          />
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 2, fontSize: "0.64rem" }}>
+            <span>50</span>
+            <span>1500</span>
+            <span>3000</span>
+            <span>4600+</span>
+          </div>
         </div>
 
         {/* South China Sea Inset */}
@@ -879,13 +882,14 @@ export function ChinaRouteMap({
               </span>
             ))
           ) : (
-            <span>点击 3D 光柱选择或查看景点，左键拖拽旋转视角，滚轮缩放</span>
+            <span>点击 3D 光柱选择景点 · 拖拽旋转从东部平原俯瞰青藏高原三级阶梯</span>
           )}
         </div>
         {hoverStop && (
           <div style={{ color: "#67e8f9", fontWeight: 600 }}>
             {hoverStop.dayLabel ? `[${hoverStop.dayLabel}] ` : ""}
-            {hoverStop.name} · {hoverStop.city} · {hoverStop.price === 0 ? "免费" : `¥${hoverStop.price}`}
+            {hoverStop.name} · {hoverStop.city} · 海拔 ~{hoverStop.elevMeters}m ·{" "}
+            {hoverStop.price === 0 ? "免费" : `¥${hoverStop.price}`}
           </div>
         )}
       </div>
