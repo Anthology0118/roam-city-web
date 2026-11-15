@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchSpots, optimizeRoute } from "../api/client";
+import { fetchFavorites, fetchSpots, optimizeRoute } from "../api/client";
 import type { ItineraryPlan, Spot } from "../types";
 import { ChinaRouteMap } from "./ChinaRouteMap";
 
@@ -10,6 +10,7 @@ interface Props {
 export function MapStudio({ onBookSpot }: Props) {
   const [spots, setSpots] = useState<Spot[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>(["gugong", "xian", "jiuzhaigou", "lijiang"]);
+  const [favCount, setFavCount] = useState(0);
   const [days, setDays] = useState(3);
   const [budget, setBudget] = useState<string>("");
   const [plan, setPlan] = useState<ItineraryPlan | null>(null);
@@ -21,7 +22,24 @@ export function MapStudio({ onBookSpot }: Props) {
       setSpots(items);
       void runOptimize(["gugong", "xian", "jiuzhaigou", "lijiang"], 3, "");
     });
+    fetchFavorites().then((ids) => setFavCount(ids.length)).catch(() => {});
   }, []);
+
+  async function importFavorites() {
+    setErr("");
+    try {
+      const ids = await fetchFavorites();
+      setFavCount(ids.length);
+      if (ids.length === 0) {
+        setErr("心愿单为空，请先在「景区导览」收藏至少 1 个景点");
+        return;
+      }
+      setSelectedIds(ids);
+      void runOptimize(ids, days, budget);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "读取心愿单失败");
+    }
+  }
 
   async function runOptimize(ids: string[], d: number, budgetVal: string) {
     if (ids.length === 0) {
@@ -64,8 +82,25 @@ export function MapStudio({ onBookSpot }: Props) {
         />
 
         <div className="panel" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <h3>自选站点求解 2-opt TSP 路线</h3>
-          <div className="chips">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <h3>自选站点求解 2-opt TSP 路线</h3>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button type="button" className="chip" onClick={() => void importFavorites()}>
+                ♥ 导入心愿单 ({favCount})
+              </button>
+              <button
+                type="button"
+                className="chip"
+                onClick={() => {
+                  setSelectedIds([]);
+                  setPlan(null);
+                }}
+              >
+                清空
+              </button>
+            </div>
+          </div>
+          <div className="chips" style={{ maxHeight: 155, overflowY: "auto", paddingRight: 4 }}>
             {spots.map((s) => {
               const active = selectedIds.includes(s.id);
               return (

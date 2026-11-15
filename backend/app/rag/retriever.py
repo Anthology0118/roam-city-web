@@ -2,6 +2,7 @@ import json
 import math
 import re
 from dataclasses import dataclass
+from typing import Literal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.models import GuideChunk
@@ -76,6 +77,7 @@ async def hybrid_search_guides(
     category: str | None = None,
     top_k: int = 3,
     rrf_k: int = 60,
+    mode: Literal["hybrid", "bm25", "vector"] = "hybrid",
 ) -> list[RetrievedChunk]:
     """Hybrid Retrieval (BM25 Lexical + Dense Vector Cosine) merged via Reciprocal Rank Fusion (RRF)."""
     stmt = select(GuideChunk)
@@ -88,7 +90,17 @@ async def hybrid_search_guides(
     q_tokens = _tokenize_cn_en(query)
     q_vec = compute_char_ngram_embedding(query)
 
-    docs_tokens = [_tokenize_cn_en(f"{r.guide_title} {r.section_title} {r.content}") for r in rows]
+    docs_tokens: list[list[str]] = []
+    metas: list[dict] = []
+    for r in rows:
+        try:
+            meta = json.loads(r.metadata_json)
+        except Exception:
+            meta = {}
+        metas.append(meta)
+        tags = " ".join(meta.get("tags", []))
+        docs_tokens.append(_tokenize_cn_en(f"{r.guide_title} {r.section_title} {tags} {r.content}"))
+
     bm25 = _bm25_scores(q_tokens, docs_tokens)
 
     vec_scores: list[float] = []
@@ -104,11 +116,13 @@ async def hybrid_search_guides(
 
     results: list[RetrievedChunk] = []
     for idx, r in enumerate(rows):
-        rrf = 1.0 / (rrf_k + bm25_rank[idx]) + 1.0 / (rrf_k + vec_rank[idx])
-        try:
-            meta = json.loads(r.metadata_json)
-        except Exception:
-            meta = {}
+        if mode == "bm25":
+            final_score = bm25[idx]
+        elif mode == "vector":
+            final_score = vec_scores[idx]
+        else:
+            final_score = 1.0 / (rrf_k + bm25_rank[idx]) + 1.0 / (rrf_k + vec_rank[idx])
+
         results.append(
             RetrievedChunk(
                 id=r.id,
@@ -117,10 +131,10 @@ async def hybrid_search_guides(
                 category=r.category,
                 section_title=r.section_title,
                 content=r.content,
-                metadata=meta,
+                metadata=metas[idx],
                 bm25_score=round(bm25[idx], 4),
                 vector_score=round(vec_scores[idx], 4),
-                rrf_score=round(rrf, 6),
+                rrf_score=round(final_score, 6),
             )
         )
 

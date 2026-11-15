@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { AgentPlanner } from "./components/AgentPlanner";
 import { BookingDesk } from "./components/BookingDesk";
+import { GalleryView } from "./components/GalleryView";
 import { GuideRag } from "./components/GuideRag";
 import { MapStudio } from "./components/MapStudio";
 import { ScenicExplorer } from "./components/ScenicExplorer";
 import type { BookingDraft } from "./types";
 
-type Tab = "agent" | "map" | "scenic" | "guide" | "booking";
+type Tab = "agent" | "map" | "scenic" | "guide" | "gallery" | "booking";
 
 export function App() {
   const [tab, setTab] = useState<Tab>("agent");
@@ -62,6 +63,13 @@ export function App() {
             </button>
             <button
               type="button"
+              className={`nav-tab ${tab === "gallery" ? "active" : ""}`}
+              onClick={() => setTab("gallery")}
+            >
+              视觉图集
+            </button>
+            <button
+              type="button"
               className={`nav-tab ${tab === "booking" ? "active" : ""}`}
               onClick={() => setTab("booking")}
             >
@@ -90,6 +98,7 @@ export function App() {
           />
         )}
         {tab === "guide" && <GuideRag />}
+        {tab === "gallery" && <GalleryView />}
         {tab === "booking" && (
           <BookingDesk initialSpotId={bookingPrefill.spotId} initialCount={bookingPrefill.count} />
         )}

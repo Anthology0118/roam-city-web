@@ -7,14 +7,24 @@ interface Props {
   onApplyBookingDraft: (draft: BookingDraft) => void;
 }
 
+interface ChatMsg {
+  role: "user" | "assistant";
+  text: string;
+}
+
 const PRESETS = [
   "周末2天预算300看自然山水，不想太累",
   "预算500去北京故宫和西安古城墙玩3天，顺便预约门票",
   "带娃去三亚3天怎么玩不累，顺便查查攻略避坑",
 ];
 
+const FOLLOW_UPS = ["改为5天", "预算放宽到800", "顺便帮我预约门票"];
+
 export function AgentPlanner({ onApplyBookingDraft }: Props) {
   const [query, setQuery] = useState(PRESETS[0]);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [turnCount, setTurnCount] = useState(0);
+  const [history, setHistory] = useState<ChatMsg[]>([]);
   const [loading, setLoading] = useState(false);
   const [statusMsg, setStatusMsg] = useState("");
   const [traces, setTraces] = useState<string[]>([]);
@@ -22,34 +32,66 @@ export function AgentPlanner({ onApplyBookingDraft }: Props) {
   const [citations, setCitations] = useState<CitationItem[]>([]);
   const [bookingDraft, setBookingDraft] = useState<BookingDraft | null>(null);
   const [answer, setAnswer] = useState("");
-  const [metrics, setMetrics] = useState<{ ttft_ms: number; total_ms: number; mode: string } | null>(null);
+  const [metrics, setMetrics] = useState<{ session_id?: string; ttft_ms: number; total_ms: number; mode: string } | null>(null);
   const [error, setError] = useState("");
 
-  async function runAgent(inputQuery: string) {
-    if (!inputQuery.trim() || loading) return;
-    setLoading(true);
-    setError("");
-    setStatusMsg("初始化 Agent 会话...");
+  function resetSession() {
+    if (loading) return;
+    setSessionId(null);
+    setTurnCount(0);
+    setHistory([]);
+    setStatusMsg("");
     setTraces([]);
     setPlan(null);
     setCitations([]);
     setBookingDraft(null);
     setAnswer("");
     setMetrics(null);
+    setError("");
+  }
 
+  async function runAgent(inputQuery: string) {
+    if (!inputQuery.trim() || loading) return;
+    const trimmed = inputQuery.trim();
+    setLoading(true);
+    setError("");
+    setStatusMsg("初始化 Agent 会话...");
+    setTraces([]);
+    setBookingDraft(null);
+    setAnswer("");
+    setMetrics(null);
+    setHistory((prev) => [...prev, { role: "user", text: trimmed }]);
+
+    let fullAnswer = "";
     try {
-      await streamAgentChat(inputQuery, {
-        onStatus: (msg) => setStatusMsg(msg),
-        onToolEvent: (label) => setTraces((prev) => [...prev, label]),
-        onPlan: (p) => setPlan(p),
-        onCitations: (items) => setCitations(items),
-        onBookingDraft: (draft) => setBookingDraft(draft),
-        onToken: (delta) => setAnswer((prev) => prev + delta),
-        onDone: (m) => {
-          setMetrics(m);
-          setStatusMsg("规划完成");
+      await streamAgentChat(
+        trimmed,
+        {
+          onStatus: (msg, meta) => {
+            setStatusMsg(msg);
+            if (meta?.session_id) setSessionId(meta.session_id);
+            if (meta?.turn) setTurnCount(meta.turn);
+          },
+          onToolEvent: (label) => setTraces((prev) => [...prev, label]),
+          onPlan: (p) => setPlan(p),
+          onCitations: (items) => setCitations(items),
+          onBookingDraft: (draft) => setBookingDraft(draft),
+          onToken: (delta) => {
+            fullAnswer += delta;
+            setAnswer((prev) => prev + delta);
+          },
+          onDone: (m) => {
+            if (m.session_id) setSessionId(m.session_id);
+            setMetrics(m);
+            setStatusMsg("规划完成");
+            if (fullAnswer.trim()) {
+              setHistory((prev) => [...prev, { role: "assistant", text: fullAnswer.trim() }]);
+            }
+          },
         },
-      });
+        sessionId
+      );
+      setQuery("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "请求失败");
     } finally {
@@ -67,8 +109,21 @@ export function AgentPlanner({ onApplyBookingDraft }: Props) {
       </div>
 
       <div className="panel">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span className="badge">
+              {sessionId ? `多轮会话 #${sessionId.slice(0, 8)} · 第 ${turnCount} 轮` : "新会话（支持多轮追问继承意图）"}
+            </span>
+          </div>
+          {sessionId && (
+            <button className="btn btn-outline" type="button" onClick={resetSession} disabled={loading}>
+              新建对话
+            </button>
+          )}
+        </div>
+
         <div className="chips">
-          {PRESETS.map((p) => (
+          {(sessionId ? FOLLOW_UPS : PRESETS).map((p) => (
             <button key={p} className="chip" type="button" onClick={() => setQuery(p)}>
               {p}
             </button>
@@ -84,12 +139,35 @@ export function AgentPlanner({ onApplyBookingDraft }: Props) {
           <input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="输入你的天数、预算、同行人群或想预约的景点..."
+            placeholder={
+              sessionId
+                ? "继续追问（如：改为5天 / 预算追加到800 / 顺便帮我预约门票）..."
+                : "输入你的天数、预算、同行人群或想预约的景点..."
+            }
           />
           <button className="btn btn-primary" type="submit" disabled={loading}>
-            {loading ? "规划中..." : "生成 AI 行程"}
+            {loading ? "规划中..." : sessionId ? "继续对话" : "生成 AI 行程"}
           </button>
         </form>
+        {history.length > 0 && (
+          <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6, maxHeight: 160, overflowY: "auto" }}>
+            {history.map((m, idx) => (
+              <div
+                key={idx}
+                style={{
+                  fontSize: "0.84rem",
+                  padding: "6px 10px",
+                  borderRadius: 8,
+                  background: m.role === "user" ? "#f4f1e8" : "#eef6f5",
+                  color: "var(--ink)",
+                }}
+              >
+                <strong>{m.role === "user" ? "你：" : "Agent："}</strong>
+                {m.text.length > 140 ? `${m.text.slice(0, 140)}...` : m.text}
+              </div>
+            ))}
+          </div>
+        )}
         {statusMsg && (
           <div style={{ marginTop: 10, fontSize: "0.86rem", color: "var(--teal-700)" }}>
             状态：{statusMsg}

@@ -82,21 +82,39 @@ export async function optimizeRoute(payload: {
   return data;
 }
 
+export async function fetchFavorites(): Promise<string[]> {
+  const res = await fetch("/api/favorites");
+  if (!res.ok) throw new Error("获取心愿单失败");
+  const data = await res.json();
+  return data.spot_ids || [];
+}
+
+export async function toggleFavorite(spotId: string): Promise<{ spot_id: string; liked: boolean; spot_ids: string[] }> {
+  const res = await fetch(`/api/favorites/${encodeURIComponent(spotId)}`, { method: "POST" });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "收藏操作失败");
+  return data;
+}
+
 export interface AgentStreamCallbacks {
-  onStatus: (msg: string) => void;
+  onStatus: (msg: string, meta?: { session_id?: string; turn?: number }) => void;
   onToolEvent: (label: string) => void;
   onPlan: (plan: ItineraryPlan) => void;
   onCitations: (items: CitationItem[]) => void;
   onBookingDraft: (draft: BookingDraft) => void;
   onToken: (delta: string) => void;
-  onDone: (metrics: { ttft_ms: number; total_ms: number; mode: string }) => void;
+  onDone: (metrics: { session_id?: string; ttft_ms: number; total_ms: number; mode: string }) => void;
 }
 
-export async function streamAgentChat(query: string, cb: AgentStreamCallbacks): Promise<void> {
+export async function streamAgentChat(
+  query: string,
+  cb: AgentStreamCallbacks,
+  sessionId?: string | null
+): Promise<void> {
   const res = await fetch("/api/agent/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query }),
+    body: JSON.stringify({ query, session_id: sessionId || undefined }),
   });
   if (!res.ok || !res.body) {
     throw new Error("Agent 流式连接失败");
@@ -127,7 +145,10 @@ export async function streamAgentChat(query: string, cb: AgentStreamCallbacks): 
 
       switch (eventName) {
         case "status":
-          cb.onStatus(payload.message || "");
+          cb.onStatus(payload.message || "", {
+            session_id: payload.session_id,
+            turn: payload.turn,
+          });
           break;
         case "tool_call":
           cb.onToolEvent(`调用工具 ${payload.tool}(${JSON.stringify(payload.args || {})})`);

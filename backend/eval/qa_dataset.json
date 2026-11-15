@@ -1,0 +1,22 @@
+[
+  {"query": "丽江几月份去最合适，要带什么证件和防晒", "expected_chunk_ids": ["lj-1"]},
+  {"query": "丽江三义机场到市区大巴多少钱，怎么去大理", "expected_chunk_ids": ["lj-2"]},
+  {"query": "丽江学生党住哪里省钱，四方街吃饭避坑和鸡豆凉粉", "expected_chunk_ids": ["lj-3"]},
+  {"query": "带6岁小孩去三亚蜈支洲岛怎么学潜水", "expected_chunk_ids": ["sanya-1"]},
+  {"query": "三亚海边玩水注意防晒和安全救生员", "expected_chunk_ids": ["sanya-2"]},
+  {"query": "青海湖日出和茶卡盐湖拍照黄金时间，CPF偏振镜怎么选", "expected_chunk_ids": ["qing-1"]},
+  {"query": "茶卡盐湖什么天气风速和云量才能拍出天空之镜", "expected_chunk_ids": ["qing-2"]},
+  {"query": "故宫门票提前几天晚上几点预约，星期几闭馆", "expected_chunk_ids": ["beijing-1"]},
+  {"query": "西安古城墙几点上去骑行，兵马俑要不要请讲解", "expected_chunk_ids": ["beijing-2"]},
+  {"query": "杭州西湖怎么游览不绕路，断桥雷峰塔路线", "expected_chunk_ids": ["jiangnan-1"]},
+  {"query": "乌镇东栅和西栅选哪个，宏村月沼几时拍照好看", "expected_chunk_ids": ["jiangnan-2"]},
+  {"query": "敦煌莫高窟A类票提前几天订，洞窟里能拍照吗", "expected_chunk_ids": ["silkroad-1"]},
+  {"query": "张掖七彩丹霞几号观景台看日落，昼夜温差穿什么", "expected_chunk_ids": ["silkroad-2"]},
+  {"query": "哈尔滨冬天零下二十度穿衣法则，手机怎么防止关机", "expected_chunk_ids": ["northeast-1"]},
+  {"query": "冰雪大世界大滑梯怎么预约，长白山天池防滑冰爪", "expected_chunk_ids": ["northeast-2"]},
+  {"query": "去稻城亚丁和九寨沟怎么预防高原反应，游览顺序", "expected_chunk_ids": ["chuanxi-1"]},
+  {"query": "景区门票学生证能半价吗，老人免票和观光车优惠", "expected_chunk_ids": ["chuanxi-2"]},
+  {"query": "西北盐湖穿红色衣服倒影和防风三脚架", "expected_chunk_ids": ["qing-1"]},
+  {"query": "免税城领券买海鲜加工攻略", "expected_chunk_ids": ["sanya-2"]},
+  {"query": "学生穷游云南三天预算大概多少钱", "expected_chunk_ids": ["lj-3", "lj-1"]}
+]

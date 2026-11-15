@@ -1,11 +1,17 @@
+import asyncio
+import uuid
 from datetime import date, timedelta
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import update
+
+from app.db.models import Spot
+from app.db.session import AsyncSessionLocal
 from app.main import app, lifespan
 
 
 @pytest.mark.asyncio
-async def test_api_spots_rag_booking_and_agent_sse():
+async def test_api_spots_rag_booking_multiturn_and_favorites():
     async with lifespan(app):
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -13,14 +19,25 @@ async def test_api_spots_rag_booking_and_agent_sse():
             assert health.status_code == 200
             assert health.json()["status"] == "ok"
 
-            spots = await client.get("/api/spots", params={"cat": "自然山水"})
+            spots = await client.get("/api/spots")
             assert spots.status_code == 200
-            assert spots.json()["total"] >= 4
+            assert spots.json()["total"] >= 36
 
             rag = await client.get("/api/guides/search", params={"q": "茶卡盐湖 拍照 避坑"})
             assert rag.status_code == 200
             assert rag.json()["items"][0]["guide_id"] == "qing"
 
+            # Favorite toggle (resilient to prior DB state)
+            fav1 = await client.post("/api/favorites/westlake")
+            assert fav1.status_code == 200
+            liked1 = fav1.json()["liked"]
+            favs_after_1 = (await client.get("/api/favorites")).json()["spot_ids"]
+            assert ("westlake" in favs_after_1) is liked1
+            fav2 = await client.post("/api/favorites/westlake")
+            assert fav2.status_code == 200
+            assert fav2.json()["liked"] is (not liked1)
+
+            # Optimistic lock booking + cancellation
             tomorrow = (date.today() + timedelta(days=1)).isoformat()
             spot_before = (await client.get("/api/spots/gugong")).json()["daily_stock"]
             booking = await client.post(
@@ -37,19 +54,74 @@ async def test_api_spots_rag_booking_and_agent_sse():
             )
             assert booking.status_code == 201
             order = booking.json()
-            assert order["total_price"] == 60  # 60 * 0.5 * 2
+            assert order["total_price"] == 60
             assert order["remaining_stock"] == spot_before - 2
 
             cancel = await client.post(f"/api/bookings/{order['id']}/cancel")
             assert cancel.status_code == 200
             assert cancel.json()["status"] == "CANCELLED"
-            spot_after = (await client.get("/api/spots/gugong")).json()["daily_stock"]
-            assert spot_after == spot_before
+            assert (await client.get("/api/spots/gugong")).json()["daily_stock"] == spot_before
 
-            async with client.stream("POST", "/api/agent/chat", json={"query": "周末2天预算300看山水并预约门票"}) as sse:
-                assert sse.status_code == 200
-                body = (await sse.aread()).decode("utf-8")
-                assert "event: plan" in body
-                assert "event: booking_draft" in body
-                assert "event: citations" in body
-                assert "event: done" in body
+            # Multi-turn Agent SSE
+            sid = f"test-session-{uuid.uuid4().hex[:8]}"
+            async with client.stream(
+                "POST", "/api/agent/chat", json={"query": "周末2天预算300看山水", "session_id": sid}
+            ) as sse1:
+                assert sse1.status_code == 200
+                body1 = (await sse1.aread()).decode("utf-8")
+                assert "event: plan" in body1
+                assert "event: done" in body1
+
+            async with client.stream(
+                "POST", "/api/agent/chat", json={"query": "预算加到600，顺便预约门票", "session_id": sid}
+            ) as sse2:
+                assert sse2.status_code == 200
+                body2 = (await sse2.aread()).decode("utf-8")
+                assert "event: booking_draft" in body2
+                assert "第 1 轮" in body2
+
+            hist = await client.get(f"/api/agent/sessions/{sid}")
+            assert hist.status_code == 200
+            assert len(hist.json()["turns"]) >= 4
+
+
+@pytest.mark.asyncio
+async def test_concurrent_booking_never_oversells():
+    async with lifespan(app):
+        # Set spot stock to 5 temporarily and fire 8 concurrent requests of 2 tickets each (max 2 can succeed)
+        async with AsyncSessionLocal() as db:
+            orig_stock = (await db.get(Spot, "potala")).daily_stock
+            await db.execute(update(Spot).where(Spot.id == "potala").values(daily_stock=5, version=1))
+            await db.commit()
+
+        tomorrow = (date.today() + timedelta(days=1)).isoformat()
+        transport = ASGITransport(app=app)
+        try:
+            async with AsyncClient(transport=transport, base_url="http://test") as client:
+                async def attempt(i: int):
+                    return await client.post(
+                        "/api/bookings",
+                        json={
+                            "spot_id": "potala",
+                            "visit_date": tomorrow,
+                            "session_slot": "上午场 08:00-12:00",
+                            "ticket_type": "成人票",
+                            "count": 2,
+                            "visitor_name": f"并发用户{i}",
+                            "phone": "13800138000",
+                        },
+                    )
+
+                responses = await asyncio.gather(*(attempt(i) for i in range(8)))
+                ok_orders = [r.json() for r in responses if r.status_code == 201]
+                conflicts = [r for r in responses if r.status_code == 409]
+
+                assert len(ok_orders) <= 2  # 5 tickets / 2 per order => at most 2 orders succeed
+                assert len(ok_orders) + len(conflicts) == 8
+                stock_left = (await client.get("/api/spots/potala")).json()["daily_stock"]
+                assert stock_left == 5 - len(ok_orders) * 2
+                assert stock_left >= 0
+        finally:
+            async with AsyncSessionLocal() as db:
+                await db.execute(update(Spot).where(Spot.id == "potala").values(daily_stock=orig_stock))
+                await db.commit()

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { fetchSpots } from "../api/client";
+import { fetchFavorites, fetchSpots, toggleFavorite } from "../api/client";
 import type { Spot } from "../types";
 
 interface Props {
@@ -12,8 +12,14 @@ export function ScenicExplorer({ onBookSpot }: Props) {
   const [cat, setCat] = useState("全部");
   const [kw, setKw] = useState("");
   const [spots, setSpots] = useState<Spot[]>([]);
+  const [favIds, setFavIds] = useState<string[]>([]);
+  const [onlyFavs, setOnlyFavs] = useState(false);
   const [selected, setSelected] = useState<Spot | null>(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    fetchFavorites().then(setFavIds).catch(() => {});
+  }, []);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -24,6 +30,17 @@ export function ScenicExplorer({ onBookSpot }: Props) {
     }, 180);
     return () => clearTimeout(timer);
   }, [cat, kw]);
+
+  async function handleToggleFav(spotId: string) {
+    try {
+      const res = await toggleFavorite(spotId);
+      setFavIds(res.spot_ids);
+    } catch {
+      // ignore transient error
+    }
+  }
+
+  const visibleSpots = onlyFavs ? spots.filter((s) => favIds.includes(s.id)) : spots;
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -36,7 +53,7 @@ export function ScenicExplorer({ onBookSpot }: Props) {
   return (
     <div>
       <div className="panel" style={{ marginBottom: 20 }}>
-        <div className="chips">
+        <div className="chips" style={{ alignItems: "center" }}>
           {CATS.map((c) => (
             <button
               key={c}
@@ -47,6 +64,13 @@ export function ScenicExplorer({ onBookSpot }: Props) {
               {c}
             </button>
           ))}
+          <button
+            type="button"
+            className={`chip ${onlyFavs ? "active" : ""}`}
+            onClick={() => setOnlyFavs((v) => !v)}
+          >
+            ♥ 心愿单 ({favIds.length})
+          </button>
         </div>
         <input
           value={kw}
@@ -58,32 +82,44 @@ export function ScenicExplorer({ onBookSpot }: Props) {
       {loading && <p style={{ marginBottom: 12, color: "var(--ink-soft)" }}>正在从后端检索景点...</p>}
 
       <div className="card-grid">
-        {spots.map((s) => (
-          <article className="spot-card" key={s.id}>
-            <img src={`/scenes/${s.scene}`} alt={s.name} loading="lazy" />
-            <div className="spot-card-body">
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span className="badge">{s.category}</span>
-                <span style={{ fontWeight: 700, color: "var(--orange-600)" }}>
-                  {s.price === 0 ? "免费" : `¥${s.price} 起`}
-                </span>
+        {visibleSpots.map((s) => {
+          const liked = favIds.includes(s.id);
+          return (
+            <article className="spot-card" key={s.id}>
+              <img src={`/scenes/${s.scene}`} alt={s.name} loading="lazy" />
+              <div className="spot-card-body">
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span className="badge">{s.category}</span>
+                  <span style={{ fontWeight: 700, color: "var(--orange-600)" }}>
+                    {s.price === 0 ? "免费" : `¥${s.price} 起`}
+                  </span>
+                </div>
+                <h3>{s.name}</h3>
+                <div style={{ fontSize: "0.84rem", color: "var(--ink-soft)" }}>
+                  📍 {s.city} · ⭐ {s.rating} · 余票 {s.daily_stock} 张
+                </div>
+                <p style={{ fontSize: "0.88rem", color: "var(--ink-soft)", flex: 1 }}>{s.description}</p>
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  <button
+                    className="btn btn-outline"
+                    type="button"
+                    aria-label={liked ? "取消收藏" : "加入心愿单"}
+                    onClick={() => void handleToggleFav(s.id)}
+                    style={{ color: liked ? "#d63b2f" : undefined, borderColor: liked ? "#d63b2f" : undefined }}
+                  >
+                    {liked ? "♥ 已收藏" : "♡ 收藏"}
+                  </button>
+                  <button className="btn btn-outline" type="button" onClick={() => setSelected(s)}>
+                    详情
+                  </button>
+                  <button className="btn btn-primary" type="button" onClick={() => onBookSpot(s.id)}>
+                    预约
+                  </button>
+                </div>
               </div>
-              <h3>{s.name}</h3>
-              <div style={{ fontSize: "0.84rem", color: "var(--ink-soft)" }}>
-                📍 {s.city} · ⭐ {s.rating} · 余票 {s.daily_stock} 张
-              </div>
-              <p style={{ fontSize: "0.88rem", color: "var(--ink-soft)", flex: 1 }}>{s.description}</p>
-              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                <button className="btn btn-outline" type="button" onClick={() => setSelected(s)}>
-                  查看详情
-                </button>
-                <button className="btn btn-primary" type="button" onClick={() => onBookSpot(s.id)}>
-                  预约门票
-                </button>
-              </div>
-            </div>
-          </article>
-        ))}
+            </article>
+          );
+        })}
       </div>
 
       {selected && (
@@ -110,7 +146,14 @@ export function ScenicExplorer({ onBookSpot }: Props) {
                 </div>
                 <div>实时余票：{selected.daily_stock} 张</div>
               </div>
-              <div style={{ marginTop: 16 }}>
+              <div style={{ marginTop: 16, display: "flex", gap: 10 }}>
+                <button
+                  className="btn btn-outline"
+                  type="button"
+                  onClick={() => void handleToggleFav(selected.id)}
+                >
+                  {favIds.includes(selected.id) ? "♥ 移出心愿单" : "♡ 加入心愿单"}
+                </button>
                 <button
                   className="btn btn-primary"
                   type="button"

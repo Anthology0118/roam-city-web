@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.planner_agent import stream_travel_agent
 from app.algo.route_planner import SpotNode, build_itinerary
-from app.db.models import BookingOrder, GuideChunk, Spot
+from app.db.models import BookingOrder, ChatTurn, FavoriteSpot, GuideChunk, Spot
 from app.db.session import get_db
 from app.rag.retriever import hybrid_search_guides
 
@@ -293,12 +293,51 @@ async def cancel_booking(order_id: str, db: AsyncSession = Depends(get_db)) -> d
 
 class ChatRequest(BaseModel):
     query: str = Field(min_length=1, max_length=500)
+    session_id: str | None = Field(default=None, max_length=64)
 
 
 @router.post("/agent/chat")
 async def agent_chat(req: ChatRequest, db: AsyncSession = Depends(get_db)) -> StreamingResponse:
     return StreamingResponse(
-        stream_travel_agent(req.query, db),
+        stream_travel_agent(req.query, db, session_id=req.session_id),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.get("/agent/sessions/{session_id}")
+async def get_chat_session(session_id: str, db: AsyncSession = Depends(get_db)) -> dict:
+    turns = (
+        await db.execute(select(ChatTurn).where(ChatTurn.session_id == session_id).order_by(ChatTurn.id.asc()))
+    ).scalars().all()
+    return {
+        "session_id": session_id,
+        "turns": [
+            {"role": t.role, "content": t.content, "created_at": t.created_at.isoformat()}
+            for t in turns
+        ],
+    }
+
+
+@router.get("/favorites")
+async def list_favorites(db: AsyncSession = Depends(get_db)) -> dict:
+    rows = (await db.execute(select(FavoriteSpot.spot_id).order_by(FavoriteSpot.created_at.desc()))).scalars().all()
+    return {"spot_ids": list(rows)}
+
+
+@router.post("/favorites/{spot_id}")
+async def toggle_favorite(spot_id: str, db: AsyncSession = Depends(get_db)) -> dict:
+    spot = await db.get(Spot, spot_id)
+    if not spot:
+        raise HTTPException(status_code=404, detail="景区不存在")
+    existing = await db.get(FavoriteSpot, spot_id)
+    if existing:
+        await db.delete(existing)
+        await db.commit()
+        liked = False
+    else:
+        db.add(FavoriteSpot(spot_id=spot_id))
+        await db.commit()
+        liked = True
+    rows = (await db.execute(select(FavoriteSpot.spot_id).order_by(FavoriteSpot.created_at.desc()))).scalars().all()
+    return {"spot_id": spot_id, "liked": liked, "spot_ids": list(rows)}
