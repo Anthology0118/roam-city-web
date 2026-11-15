@@ -7,8 +7,8 @@
 1. **AI 行程规划 Agent（多轮对话记忆 + Function/Tool Calling + SSE）**
    - `backend/app/agent/planner_agent.py`：支持多轮会话持久化（`ChatTurn`）与槽位继承，透明推送 `status -> tool_call -> tool_result -> plan -> citations -> booking_draft -> token -> done` 多阶段 SSE 事件流。
    - 配置 `LLM_API_KEY` 后启用真实 **OpenAI-compatible Tool Calling** 循环（`search_spots` / `search_guides` / `plan_optimized_route` / `draft_booking`）；未配置 Key 时自动降级到本地确定性合成模式，零门槛可运行演示。
-2. **中国地理坐标投影地图 + 确定性路径规划（Anti-Hallucination）**
-   - `frontend/src/components/ChinaRouteMap.tsx` & `MapStudio.tsx`：基于 `d3-geo` Mercator 投影渲染全国 34 省级行政边界与 **36 个真实经纬度景区**，支持自由选点或从心愿单一键导入并实时求解最短路径。
+2. **3D 中国地理坐标沙盘 + 确定性路径规划（Anti-Hallucination）**
+   - `frontend/src/components/ChinaRouteMap.tsx` & `MapStudio.tsx`：基于 `d3-geo` Mercator 投影与 **Three.js WebGL** 立体挤出渲染全国 34 省级地形、**36 个真实经纬度景区光柱** 与 **3D 二次贝塞尔航线飞线**，支持拖拽旋转/缩放、悬停立体抬升及从心愿单一键导入求解。
    - `backend/app/algo/route_planner.py`：基于 WGS-84 经纬度计算 **Haversine 球面距离**，使用 **最近邻贪心 + 2-opt 局部搜索** 在预算与每日时长约束下求解最优顺序，量化对比并展示节省里程。
 3. **Hybrid RAG 攻略检索与离线量化评测**
    - `backend/app/rag/retriever.py`：对 **8 篇攻略 / 17 个章节切片** 结合 **BM25 词法检索 + 384 维符号随机投影向量相似度** 并通过 **RRF（Reciprocal Rank Fusion）** 融合排序。

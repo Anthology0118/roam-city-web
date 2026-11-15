@@ -66,9 +66,9 @@ export function MapStudio({ onBookSpot }: Props) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <div className="hero-banner">
-        <h1>中国地理坐标投影与 2-opt 最短路径实验室</h1>
+        <h1>3D 中国地理坐标沙盘与 2-opt 最短路径实验室</h1>
         <p>
-          基于 d3-geo Mercator 投影渲染全国 34 省级边界与景点真实经纬度；自由勾选目的地，实时对比贪心基线与 2-opt 局部搜索省下的跨城里程。
+          基于 d3-geo Mercator 投影与 Three.js WebGL 立体挤出渲染全国 34 省级地形、36 处真实景区光柱与 3D 贝塞尔飞线；支持拖拽旋转、悬停高亮与心愿单路线求解。
         </p>
       </div>
 
