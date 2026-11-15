@@ -1,75 +1,68 @@
-# 漫游城市 · 旅游攻略站
+# 漫游城市 AI · RoamCity AI
 
-纯 HTML / CSS / JavaScript 实现的多页面旅游攻略站点。无框架、无构建步骤、无后端依赖；数据内置于 JS，插画为本地 SVG，支持 `file://` 协议下直接运行。
+> 从大一纯静态前端课设重构升级为 **AI 应用全栈工程项目**：**React 18 + TypeScript + Vite**（前端）+ **Python FastAPI + SQLAlchemy Async**（后端）+ **Hybrid RAG（BM25 + 向量 RRF）** + **2-opt TSP 路径规划算法**。
 
-## 预览
+## 核心架构与技术亮点
 
-首页截图（`images/home.png`）：
+1. **AI 行程规划 Agent（SSE 多阶段流式编排）**
+   - `backend/app/agent/planner_agent.py`：解析自然语言出行约束（天数、预算、主题、购票意图），透明推送 `status -> tool_call -> tool_result -> plan -> citations -> booking_draft -> token -> done` 多阶段 SSE 事件流。
+   - 支持配置任意兼容 OpenAI 协议的模型（DeepSeek / Qwen / OpenAI），未配置 Key 时自动降级到本地确定性合成模式，保证零门槛可运行演示。
+2. **确定性路径规划算法（Anti-Hallucination）**
+   - `backend/app/algo/route_planner.py`：基于景点 WGS-84 经纬度计算 **Haversine 球面距离**，使用 **最近邻贪心 + 2-opt 局部搜索** 在预算与每日时长约束下求解最优游览顺序，避免大模型直接排线带来的地理绕路与价格幻觉。
+3. **Hybrid RAG 攻略检索与溯源**
+   - `backend/app/rag/retriever.py`：对攻略按章节切片，结合 **BM25 词法检索 + 向量余弦相似度** 并通过 **RRF（Reciprocal Rank Fusion）** 融合排序，支持前端点击跳转原文。
+4. **数据库事务与乐观锁门票预约**
+   - `backend/app/api/routes.py`：通过版本号 `version` 实现分景点余票乐观锁扣减，订单取消自动回滚库存。
 
-![首页截图](images/home.png)
+## 本地运行（前后端分离）
 
-## 页面
+### 1. 启动后端（FastAPI）
 
-| 页面 | 说明 |
-| --- | --- |
-| `index.html` | 首页：视差首屏、热门目的地、编辑精选轮播、经典路线、旅友评价 |
-| `scenic.html` | 精选景点：分类 / 关键词筛选、收藏、详情弹窗 |
-| `guide.html` | 旅行攻略：文章切换、目录滚动高亮、FAQ 折叠 |
-| `gallery.html` | 视觉图集：瀑布流、Lightbox 灯箱 |
-| `booking.html` | 门票预约：表单校验、订单本地保存与取消 |
-
-## 功能
-
-- 响应式布局（断点 992 / 768 / 480 px），移动端汉堡菜单
-- CSS 动效：首屏视差、打字机文案、滚动进场、数字滚动
-- 组件：轮播、Tab、手风琴、Modal、Lightbox、瀑布流、Toast
-- 表单校验：姓名 / 手机号 / 身份证 / 邮箱正则，日期与条款校验
-- `localStorage` 持久化：收藏、预约订单、订阅邮箱
-- 页面间 URL 参数联动（`?spot=` / `?cat=` / `?keyword=` / `?g=`）
-
-## 运行
-
-```
-# 本地直接运行（无需服务器，离线可用）
-双击 index.html，使用 Chrome / Edge 打开
-
-# 预览响应式效果
-F12 → 设备模拟（手机 / 平板尺寸）
+```powershell
+cd backend
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
 ```
 
-可选：部署到 GitHub Pages。Settings → Pages → Source 选择 `main` 分支，构建完成后即可通过 `https://<用户名>.github.io/roam-city-web/` 访问。
+如需接入真实大模型，复制 `backend/.env.example` 为 `backend/.env` 并填写 `LLM_API_KEY`、`LLM_BASE_URL`、`LLM_MODEL`。
+
+### 2. 启动前端（React + TypeScript + Vite）
+
+```powershell
+cd frontend
+npm run dev
+```
+
+浏览器访问 `http://localhost:5173`（Vite 已配置 `/api` 反向代理至 `http://127.0.0.1:8000`）。
+
+### 3. 运行测试与构建验证
+
+```powershell
+# 后端单元测试与接口集成测试
+cd backend
+.\.venv\Scripts\python.exe -m pytest -v
+
+# 前端类型检查与生产构建
+cd frontend
+npm run build
+```
 
 ## 目录结构
 
-```
+```text
 .
-├─ index.html
-├─ scenic.html
-├─ guide.html
-├─ gallery.html
-├─ booking.html
-├─ assets/
-│  ├─ css/
-│  │  └─ style.css         全站样式
-│  ├─ js/
-│  │  ├─ main.js           公共脚本（导航 / 预加载 / 收藏 / Toast 等）
-│  │  ├─ data.js           站点数据
-│  │  ├─ home.js           首页
-│  │  ├─ scenic.js         景点页
-│  │  ├─ guide.js          攻略页
-│  │  ├─ gallery.js        图集页
-│  │  └─ booking.js        预约页
-│  └─ images/
-│     └─ scenes/           本地 SVG 插画（11 幅）
-└─ README.md
+├─ backend/                 # Python 3.13 + FastAPI 后端
+│  ├─ app/
+│  │  ├─ agent/             # SSE Agent 编排与 Tool Calling
+│  │  ├─ algo/              # Haversine + 2-opt 路径规划算法
+│  │  ├─ api/               # REST & SSE 路由
+│  │  ├─ core/              # Pydantic Settings 配置
+│  │  ├─ db/                # SQLAlchemy Async 模型与种子数据
+│  │  └─ rag/               # BM25 + Vector RRF 混合检索
+│  └─ tests/                # Pytest 算法与接口测试
+├─ frontend/                # React 18 + TypeScript + Vite 前端
+│  ├─ public/scenes/        # 景区矢量插画资源
+│  └─ src/
+│     ├─ api/               # REST 客户端与 ReadableStream SSE 解析
+│     └─ components/        # AI 工作台 / 景点检索 / RAG 攻略 / 门票预约
+└─ index.html ...           # 大一初版静态页面（已修复已知弹窗与 XSS 隐患）
 ```
-
-## 技术要点
-
-- 语义化 HTML5，含基础 ARIA 标注
-- CSS 变量统一设计令牌；Flex / Grid / Columns 三类布局
-- IntersectionObserver 实现滚动进场动画与数字滚动
-- 动态内容由页面脚本同步渲染，滚动观察器可见
-- `URLSearchParams` + `history.replaceState` 同步筛选状态（`file://` 下自动降级）
-
-无第三方依赖，全部为原生 Web 技术。用于 Web 前端课程作业演示。

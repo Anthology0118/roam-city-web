@@ -4,4 +4,15 @@ Desktop.ini
 .DS_Store
 *.log
 
-# 说明：本仓库为纯静态站点（无依赖），无需忽略 node_modules
+# ---- Python / Backend ----
+backend/.venv/
+backend/*.db
+backend/.env
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# ---- Frontend / Node ----
+frontend/node_modules/
+frontend/dist/
+*.tsbuildinfo

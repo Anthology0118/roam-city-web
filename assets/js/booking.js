@@ -36,6 +36,14 @@
     try { return JSON.parse(localStorage.getItem(ORDER_KEY)) || []; } catch (e) { return []; }
   }
   function writeOrders(list) { localStorage.setItem(ORDER_KEY, JSON.stringify(list)); }
+  function esc(str) {
+    return String(str == null ? "" : str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
 
   /* ---------- 单价 / 总额 ---------- */
   function currentUnit() {
@@ -111,15 +119,15 @@
       return (
         '<div class="order-item">' +
           '<div class="o-top">' +
-            '<div><div class="o-name">' + o.spotName + '</div>' +
-            '<div class="o-id">订单号 ' + o.id + ' · 下单于 ' + o.time + '</div></div>' +
+            '<div><div class="o-name">' + esc(o.spotName) + '</div>' +
+            '<div class="o-id">订单号 ' + esc(o.id) + ' · 下单于 ' + esc(o.time) + '</div></div>' +
             '<div class="o-total">¥' + o.total.toLocaleString() + '</div>' +
           '</div>' +
           '<div class="o-row">' +
-            '<span>🗓 ' + o.date + '</span>' +
-            '<span>🕘 ' + o.session + '</span>' +
-            '<span>🎫 ' + o.type + ' × ' + o.count + '</span>' +
-            '<span>👤 ' + o.name + ' · ' + o.phone + '</span>' +
+            '<span>🗓 ' + esc(o.date) + '</span>' +
+            '<span>🕘 ' + esc(o.session) + '</span>' +
+            '<span>🎫 ' + esc(o.type) + ' × ' + o.count + '</span>' +
+            '<span>👤 ' + esc(o.name) + ' · ' + esc(o.phone) + '</span>' +
           '</div>' +
           '<span class="o-status ' + (cancelled ? "cancel" : "ok") + '">' + (cancelled ? "已取消" : "预约成功") + '</span>' +
           (cancelled
@@ -191,6 +199,11 @@
         setCount(1);
         refreshSum();
         Array.prototype.forEach.call(dateChips.children, function (c) { c.classList.remove("on"); });
+        ["eSpot", "eDate", "eName", "ePhone", "eId", "eEmail", "eCount", "eAgree"].forEach(clearErr);
+        ["fSpot", "fDate", "fName", "fPhone", "fId", "fEmail"].forEach(function (id) {
+          var el = document.getElementById(id);
+          if (el) el.classList.remove("err");
+        });
       }, 0);
     });
 
@@ -289,9 +302,9 @@
     $("#bkFields").style.display = "none";
     $("#bkSuccess").style.display = "block";
     $("#successMsg").innerHTML =
-      '【' + order.spotName + '】' + order.date + ' ' + order.session +
-      ' · ' + order.type + '×' + order.count + '，共 <b style="color:#f2601e">¥' + order.total.toLocaleString() + '</b>' +
-      '。<br>订单号 <b>' + order.id + '</b> 已存入「我的订单」，可在右侧取消。';
+      '【' + esc(order.spotName) + '】' + esc(order.date) + ' ' + esc(order.session) +
+      ' · ' + esc(order.type) + '×' + order.count + '，共 <b style="color:#f2601e">¥' + order.total.toLocaleString() + '</b>' +
+      '。<br>订单号 <b>' + esc(order.id) + '</b> 已存入「我的订单」，可在右侧取消。';
     window.toast && window.toast("预约成功！订单已保存", "success");
   }
 

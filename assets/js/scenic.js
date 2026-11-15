@@ -143,15 +143,6 @@
     document.addEventListener("keydown", function (e) {
       if (e.key === "Escape" && modal.classList.contains("on")) closeModal();
     });
-    /* 收藏按钮在弹窗里也能用（状态由 main.js 委托 + 弹窗自身视觉同步） */
-    modal.addEventListener("click", function (e) {
-      var fb = e.target.closest("[data-fav]");
-      if (fb && fb.id === "dFav") {
-        /* main.js 的全局委托会切换 Roam 收藏；这里同步 ♥ 视觉 */
-        var liked = window.Roam.isFav(fb.dataset.fav);
-        fb.classList.toggle("liked", liked);
-      }
-    });
   }
 
   /* ---------- 事件绑定 ---------- */
@@ -192,8 +183,16 @@
       }
     });
 
-    /* 心愿清单数量变化 */
-    window.addEventListener("roam:favchange", updateFavCount);
+    /* 心愿清单数量变化 + 同步卡片/弹窗收藏态 */
+    window.addEventListener("roam:favchange", function (e) {
+      updateFavCount();
+      if (!e.detail) return;
+      var btns = document.querySelectorAll('[data-fav="' + e.detail.id + '"]');
+      Array.prototype.forEach.call(btns, function (b) {
+        b.classList.toggle("liked", e.detail.liked);
+        b.setAttribute("aria-pressed", String(e.detail.liked));
+      });
+    });
   }
 
   /* ---------- URL 参数支持（?cat= ?keyword= ?spot=） ---------- */
@@ -221,6 +220,7 @@
   applyFilters(true);       /* 首次带出场动画 */
   updateFavCount();
   bindEvents();
+  initModalEvents();
 
   /* 首页/页脚带 ?spot=xxx 跳转进来时，自动弹出详情 */
   if (qs.get("spot")) {
