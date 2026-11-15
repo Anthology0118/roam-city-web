@@ -3,6 +3,15 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   plugins: [react()],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          "china-geojson": ["china-map-geojson/lib/china.js", "d3-geo"],
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy: {

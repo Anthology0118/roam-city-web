@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { streamAgentChat } from "../api/client";
 import type { BookingDraft, CitationItem, ItineraryPlan } from "../types";
+import { ChinaRouteMap } from "./ChinaRouteMap";
 
 interface Props {
   onApplyBookingDraft: (draft: BookingDraft) => void;
@@ -157,6 +158,8 @@ export function AgentPlanner({ onApplyBookingDraft }: Props) {
                   <span className="badge orange">2-opt 省路 {plan.distance_saved_km} km</span>
                 )}
               </div>
+
+              <ChinaRouteMap plan={plan} height={310} />
 
               {plan.days.map((d) => (
                 <div

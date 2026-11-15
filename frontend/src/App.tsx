@@ -2,10 +2,11 @@ import { useState } from "react";
 import { AgentPlanner } from "./components/AgentPlanner";
 import { BookingDesk } from "./components/BookingDesk";
 import { GuideRag } from "./components/GuideRag";
+import { MapStudio } from "./components/MapStudio";
 import { ScenicExplorer } from "./components/ScenicExplorer";
 import type { BookingDraft } from "./types";
 
-type Tab = "agent" | "scenic" | "guide" | "booking";
+type Tab = "agent" | "map" | "scenic" | "guide" | "booking";
 
 export function App() {
   const [tab, setTab] = useState<Tab>("agent");
@@ -40,6 +41,13 @@ export function App() {
             </button>
             <button
               type="button"
+              className={`nav-tab ${tab === "map" ? "active" : ""}`}
+              onClick={() => setTab("map")}
+            >
+              中国地图排线
+            </button>
+            <button
+              type="button"
               className={`nav-tab ${tab === "scenic" ? "active" : ""}`}
               onClick={() => setTab("scenic")}
             >
@@ -65,6 +73,14 @@ export function App() {
 
       <main className="container">
         {tab === "agent" && <AgentPlanner onApplyBookingDraft={applyDraft} />}
+        {tab === "map" && (
+          <MapStudio
+            onBookSpot={(spotId) => {
+              setBookingPrefill({ spotId, count: 1 });
+              setTab("booking");
+            }}
+          />
+        )}
         {tab === "scenic" && (
           <ScenicExplorer
             onBookSpot={(spotId) => {

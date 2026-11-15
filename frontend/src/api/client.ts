@@ -67,6 +67,21 @@ export async function cancelBooking(orderId: string): Promise<void> {
   if (!res.ok) throw new Error(data.detail || "取消失败");
 }
 
+export async function optimizeRoute(payload: {
+  spot_ids?: string[];
+  days: number;
+  budget?: number | null;
+}): Promise<ItineraryPlan> {
+  const res = await fetch("/api/planner/optimize", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "路线优化失败");
+  return data;
+}
+
 export interface AgentStreamCallbacks {
   onStatus: (msg: string) => void;
   onToolEvent: (label: string) => void;
