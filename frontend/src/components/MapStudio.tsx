@@ -73,13 +73,15 @@ export function MapStudio({ onBookSpot }: Props) {
       </div>
 
       <div className="grid-2">
-        <ChinaRouteMap
-          spots={spots}
-          plan={plan}
-          selectedSpotIds={selectedIds}
-          onToggleSpot={toggleSpot}
-          height={520}
-        />
+        <div className="sticky-pane">
+          <ChinaRouteMap
+            spots={spots}
+            plan={plan}
+            selectedSpotIds={selectedIds}
+            onToggleSpot={toggleSpot}
+            height={470}
+          />
+        </div>
 
         <div className="panel" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
