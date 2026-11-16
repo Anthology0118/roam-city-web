@@ -5,6 +5,7 @@ import type {
   BookingDraft,
   BookingOrder,
   CitationItem,
+  DetectModelsResult,
   GuideDoc,
   GuideSearchHit,
   ItineraryPlan,
@@ -117,6 +118,29 @@ export async function toggleFavorite(spotId: string): Promise<{ spot_id: string;
   const data = await res.json();
   if (!res.ok) throw new Error(data.detail || "收藏操作失败");
   return data;
+}
+
+export async function detectLlmModels(payload: {
+  apiKey: string;
+  baseUrl: string;
+  probe?: boolean;
+  probeModels?: string[];
+  maxProbe?: number;
+}): Promise<DetectModelsResult> {
+  const res = await fetch("/api/agent/detect-models", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      api_key: payload.apiKey.trim(),
+      base_url: payload.baseUrl.trim(),
+      probe: payload.probe ?? true,
+      probe_models: payload.probeModels,
+      max_probe: payload.maxProbe ?? 8,
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "模型检测失败");
+  return data as DetectModelsResult;
 }
 
 export async function testLlmConnection(llm: LlmConfig): Promise<LlmTestResult> {

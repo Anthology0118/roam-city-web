@@ -136,6 +136,22 @@ export interface LlmTestResult {
   error?: string;
 }
 
+export interface ModelProbeItem {
+  model: string;
+  usable: boolean;
+  latency_ms: number;
+  error?: string | null;
+}
+
+export interface DetectModelsResult {
+  ok: boolean;
+  total_models?: number;
+  models: string[];
+  probed: ModelProbeItem[];
+  usable_models: string[];
+  error?: string | null;
+}
+
 export interface AgentDoneMetrics {
   session_id?: string;
   ttft_ms: number;

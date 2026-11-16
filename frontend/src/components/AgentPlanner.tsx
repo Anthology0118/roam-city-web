@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import {
   deleteAgentSession,
+  detectLlmModels,
   fetchAgentSessions,
   fetchAgentSessionTurns,
   streamAgentChat,
@@ -12,6 +13,7 @@ import type {
   AgentTraceItem,
   BookingDraft,
   CitationItem,
+  DetectModelsResult,
   ItineraryPlan,
   LlmConfig,
   LlmTestResult,
@@ -40,25 +42,20 @@ const FOLLOW_UPS = ["改为5天", "预算放宽到800", "那边的避坑攻略�
 
 const LLM_STORAGE_KEY = "roamcity_llm_config";
 
-interface LlmProviderPreset {
+interface LlmEndpointPreset {
   id: string;
   label: string;
   baseUrl: string;
-  models: string[];
+  defaultModel?: string;
 }
 
-const LLM_PROVIDERS: LlmProviderPreset[] = [
-  { id: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", models: ["deepseek-chat", "deepseek-reasoner"] },
-  {
-    id: "qwen",
-    label: "通义千问 DashScope",
-    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    models: ["qwen-plus", "qwen-max", "qwen-turbo"],
-  },
-  { id: "glm", label: "智谱 GLM", baseUrl: "https://open.bigmodel.cn/api/paas/v4", models: ["glm-4-plus", "glm-4-flash"] },
-  { id: "kimi", label: "Moonshot Kimi", baseUrl: "https://api.moonshot.cn/v1", models: ["moonshot-v1-8k", "moonshot-v1-32k"] },
-  { id: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1", models: ["gpt-4o-mini", "gpt-4o"] },
-  { id: "custom", label: "自定义", baseUrl: "", models: [] },
+const LLM_ENDPOINTS: LlmEndpointPreset[] = [
+  { id: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", defaultModel: "deepseek-chat" },
+  { id: "qwen", label: "通义千问 DashScope", baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", defaultModel: "qwen-plus" },
+  { id: "siliconflow", label: "SiliconFlow", baseUrl: "https://api.siliconflow.cn/v1" },
+  { id: "openrouter", label: "OpenRouter", baseUrl: "https://openrouter.ai/api/v1" },
+  { id: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1" },
+  { id: "custom", label: "自定义中转 / 本地 Ollama", baseUrl: "" },
 ];
 
 function loadInitialLlmConfig(): LlmConfig {
@@ -68,7 +65,7 @@ function loadInitialLlmConfig(): LlmConfig {
   } catch {
     // ignore storage access issues
   }
-  return { apiKey: "", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat" };
+  return { apiKey: "", baseUrl: "https://api.deepseek.com/v1", model: "" };
 }
 
 const TRACE_BADGES: Record<AgentTraceItem["kind"], { icon: string; tag: string; border: string }> = {
@@ -97,16 +94,61 @@ export function AgentPlanner({ onApplyBookingDraft, onOpenGuide, onTransferToMap
   const [error, setError] = useState("");
   const [showLlmConfig, setShowLlmConfig] = useState(false);
   const [llmConfig, setLlmConfig] = useState<LlmConfig>(loadInitialLlmConfig);
-  const [customModelMode, setCustomModelMode] = useState(false);
   const [discoveredModels, setDiscoveredModels] = useState<string[]>([]);
+  const [modelFilter, setModelFilter] = useState("");
+  const [detectingModels, setDetectingModels] = useState(false);
+  const [detectResult, setDetectResult] = useState<DetectModelsResult | null>(null);
   const [testingLlm, setTestingLlm] = useState(false);
   const [llmTestResult, setLlmTestResult] = useState<LlmTestResult | null>(null);
 
   const matchedProvider =
-    LLM_PROVIDERS.find((p) => p.baseUrl && p.baseUrl === llmConfig.baseUrl.trim()) || LLM_PROVIDERS[LLM_PROVIDERS.length - 1];
-  const modelOptions = Array.from(
-    new Set([...(matchedProvider.models || []), ...discoveredModels, llmConfig.model].filter(Boolean))
-  );
+    LLM_ENDPOINTS.find((p) => p.baseUrl && p.baseUrl === llmConfig.baseUrl.trim()) ||
+    LLM_ENDPOINTS[LLM_ENDPOINTS.length - 1];
+
+  const filteredDiscovered = modelFilter.trim()
+    ? discoveredModels.filter((m) => m.toLowerCase().includes(modelFilter.trim().toLowerCase()))
+    : discoveredModels;
+
+  async function handleDetectModels(probe: boolean) {
+    setDetectingModels(true);
+    setDetectResult(null);
+    setLlmTestResult(null);
+    try {
+      const targetSubset =
+        probe && modelFilter.trim() && filteredDiscovered.length > 0
+          ? filteredDiscovered.slice(0, 8)
+          : undefined;
+      const res = await detectLlmModels({
+        apiKey: llmConfig.apiKey,
+        baseUrl: llmConfig.baseUrl,
+        probe,
+        probeModels: targetSubset,
+        maxProbe: 8,
+      });
+      setDetectResult(res);
+      if (res.models && res.models.length > 0) {
+        setDiscoveredModels(res.models);
+      }
+      // Auto-select first verified usable model if current model is empty or unavailable
+      if (res.usable_models && res.usable_models.length > 0) {
+        if (!llmConfig.model.trim() || !res.usable_models.includes(llmConfig.model)) {
+          updateLlmConfig({ ...llmConfig, model: res.usable_models[0] });
+        }
+      } else if (!llmConfig.model.trim() && res.models && res.models.length > 0) {
+        updateLlmConfig({ ...llmConfig, model: res.models[0] });
+      }
+    } catch (e) {
+      setDetectResult({
+        ok: false,
+        models: [],
+        probed: [],
+        usable_models: [],
+        error: e instanceof Error ? e.message : "检测可用模型失败",
+      });
+    } finally {
+      setDetectingModels(false);
+    }
+  }
 
   async function handleTestLlm() {
     setTestingLlm(true);
@@ -114,7 +156,7 @@ export function AgentPlanner({ onApplyBookingDraft, onOpenGuide, onTransferToMap
     try {
       const res = await testLlmConnection(llmConfig);
       setLlmTestResult(res);
-      if (res.available_models && res.available_models.length > 0) {
+      if (res.available_models && res.available_models.length > 0 && discoveredModels.length === 0) {
         setDiscoveredModels(res.available_models);
       }
     } catch (e) {
@@ -292,7 +334,7 @@ export function AgentPlanner({ onApplyBookingDraft, onOpenGuide, onTransferToMap
               style={{ padding: "5px 12px", fontSize: "0.82rem" }}
               onClick={() => setShowLlmConfig((v) => !v)}
             >
-              ⚙️ {showLlmConfig ? "收起模型配置" : "接入大模型 API"}
+              ⚙️ {showLlmConfig ? "收起模型配置" : "模型配置与可用性检测"}
             </button>
             {sessionId && (
               <button
@@ -308,7 +350,7 @@ export function AgentPlanner({ onApplyBookingDraft, onOpenGuide, onTransferToMap
           </div>
         </div>
 
-        {/* Optional Runtime LLM Configuration Drawer with Presets, Model Selector & Live Test */}
+        {/* Runtime LLM Configuration Drawer with Live Model Discovery & Availability Probing */}
         {showLlmConfig && (
           <div
             style={{
@@ -323,8 +365,8 @@ export function AgentPlanner({ onApplyBookingDraft, onOpenGuide, onTransferToMap
             }}
           >
             <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-              <span style={{ fontSize: "0.8rem", color: "var(--ink-soft)", fontWeight: 600 }}>服务商预设：</span>
-              {LLM_PROVIDERS.map((p) => {
+              <span style={{ fontSize: "0.8rem", color: "var(--ink-soft)", fontWeight: 600 }}>常用端点地址：</span>
+              {LLM_ENDPOINTS.map((p) => {
                 const active = matchedProvider.id === p.id;
                 return (
                   <button
@@ -334,17 +376,13 @@ export function AgentPlanner({ onApplyBookingDraft, onOpenGuide, onTransferToMap
                     style={{ padding: "3px 10px", fontSize: "0.76rem" }}
                     onClick={() => {
                       setLlmTestResult(null);
+                      setDetectResult(null);
                       setDiscoveredModels([]);
-                      if (p.id === "custom") {
-                        setCustomModelMode(true);
-                      } else {
-                        setCustomModelMode(false);
-                        updateLlmConfig({
-                          ...llmConfig,
-                          baseUrl: p.baseUrl,
-                          model: p.models[0] || llmConfig.model,
-                        });
-                      }
+                      updateLlmConfig({
+                        ...llmConfig,
+                        baseUrl: p.baseUrl,
+                        model: p.defaultModel || "",
+                      });
                     }}
                   >
                     {p.label}
@@ -375,11 +413,12 @@ export function AgentPlanner({ onApplyBookingDraft, onOpenGuide, onTransferToMap
               </label>
 
               <label style={{ fontSize: "0.82rem" }}>
-                Base URL（兼容 OpenAI 协议）
+                Base URL（兼容 OpenAI 协议，如 https://.../v1）
                 <input
                   value={llmConfig.baseUrl}
                   onChange={(e) => {
                     setLlmTestResult(null);
+                    setDetectResult(null);
                     updateLlmConfig({ ...llmConfig, baseUrl: e.target.value });
                   }}
                   placeholder="https://api.deepseek.com/v1"
@@ -387,43 +426,21 @@ export function AgentPlanner({ onApplyBookingDraft, onOpenGuide, onTransferToMap
               </label>
 
               <label style={{ fontSize: "0.82rem" }}>
-                模型选择{discoveredModels.length > 0 ? `（已拉取 ${discoveredModels.length} 个）` : ""}
-                {customModelMode ? (
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <input
-                      value={llmConfig.model}
-                      onChange={(e) => updateLlmConfig({ ...llmConfig, model: e.target.value })}
-                      placeholder="输入模型 ID"
-                    />
-                    <button
-                      type="button"
-                      className="chip"
-                      style={{ whiteSpace: "nowrap", fontSize: "0.76rem" }}
-                      onClick={() => setCustomModelMode(false)}
-                    >
-                      列表
-                    </button>
-                  </div>
-                ) : (
-                  <select
-                    value={llmConfig.model}
-                    onChange={(e) => {
-                      if (e.target.value === "__custom__") {
-                        setCustomModelMode(true);
-                      } else {
-                        setLlmTestResult(null);
-                        updateLlmConfig({ ...llmConfig, model: e.target.value });
-                      }
-                    }}
-                  >
-                    {modelOptions.map((m) => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                    <option value="__custom__">+ 手动输入其他模型...</option>
-                  </select>
-                )}
+                当前使用的模型 ID{discoveredModels.length > 0 ? `（已发现 ${discoveredModels.length} 个）` : ""}
+                <input
+                  list="roamcity-live-models"
+                  value={llmConfig.model}
+                  onChange={(e) => {
+                    setLlmTestResult(null);
+                    updateLlmConfig({ ...llmConfig, model: e.target.value });
+                  }}
+                  placeholder="先点击下方「检测可用模型」或手动输入"
+                />
+                <datalist id="roamcity-live-models">
+                  {discoveredModels.map((m) => (
+                    <option key={m} value={m} />
+                  ))}
+                </datalist>
               </label>
             </div>
 
@@ -433,10 +450,28 @@ export function AgentPlanner({ onApplyBookingDraft, onOpenGuide, onTransferToMap
                   type="button"
                   className="btn btn-primary"
                   style={{ padding: "6px 14px", fontSize: "0.82rem" }}
-                  disabled={testingLlm}
+                  disabled={detectingModels || testingLlm}
+                  onClick={() => void handleDetectModels(true)}
+                >
+                  {detectingModels ? "⏳ 正在检测接口与模型..." : "🔍 检测并实测可用模型"}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  style={{ padding: "5px 12px", fontSize: "0.8rem" }}
+                  disabled={detectingModels || testingLlm}
+                  onClick={() => void handleDetectModels(false)}
+                >
+                  📋 仅拉取全部 /models
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  style={{ padding: "5px 12px", fontSize: "0.8rem" }}
+                  disabled={testingLlm || detectingModels || !llmConfig.model.trim()}
                   onClick={() => void handleTestLlm()}
                 >
-                  {testingLlm ? "⏳ 正在测试接口..." : "⚡ 测试连通性"}
+                  {testingLlm ? "⏳ 测试中..." : "⚡ 测试当前模型"}
                 </button>
                 <button
                   type="button"
@@ -444,28 +479,116 @@ export function AgentPlanner({ onApplyBookingDraft, onOpenGuide, onTransferToMap
                   style={{ padding: "5px 12px", fontSize: "0.8rem" }}
                   onClick={() => {
                     setLlmTestResult(null);
+                    setDetectResult(null);
                     setDiscoveredModels([]);
-                    updateLlmConfig({ apiKey: "", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat" });
+                    setModelFilter("");
+                    updateLlmConfig({ apiKey: "", baseUrl: "https://api.deepseek.com/v1", model: "" });
                   }}
                 >
                   清空 Key
                 </button>
               </div>
-
-              {llmTestResult && (
-                <div
-                  style={{
-                    fontSize: "0.82rem",
-                    fontWeight: 600,
-                    color: llmTestResult.ok ? "#047857" : "#b91c1c",
-                  }}
-                >
-                  {llmTestResult.ok
-                    ? `✅ 连接成功 · ${llmTestResult.latency_ms}ms · ${llmTestResult.model}（回复：${llmTestResult.reply_preview}）`
-                    : `❌ 连接失败${llmTestResult.latency_ms ? ` (${llmTestResult.latency_ms}ms)` : ""}：${llmTestResult.error}`}
-                </div>
-              )}
             </div>
+
+            {llmTestResult && (
+              <div
+                style={{
+                  fontSize: "0.82rem",
+                  fontWeight: 600,
+                  color: llmTestResult.ok ? "#047857" : "#b91c1c",
+                }}
+              >
+                {llmTestResult.ok
+                  ? `✅ 模型 ${llmTestResult.model} 实测可用 · ${llmTestResult.latency_ms}ms（回复：${llmTestResult.reply_preview}）`
+                  : `❌ 模型 ${llmTestResult.model} 不可用${llmTestResult.latency_ms ? ` (${llmTestResult.latency_ms}ms)` : ""}：${llmTestResult.error}`}
+              </div>
+            )}
+
+            {detectResult && (
+              <div
+                style={{
+                  background: "#fff",
+                  border: "1px solid var(--line)",
+                  borderRadius: 10,
+                  padding: 10,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 8,
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: "0.82rem" }}>
+                  <strong>
+                    {detectResult.error
+                      ? `❌ 检测失败：${detectResult.error}`
+                      : `接口共暴露 ${detectResult.models.length} 个模型` +
+                        (detectResult.probed.length > 0
+                          ? ` · 本轮实测 ${detectResult.probed.length} 个：✅ ${detectResult.usable_models.length} 个可用 / ❌ ${detectResult.probed.length - detectResult.usable_models.length} 个失败`
+                          : "")}
+                  </strong>
+                  {discoveredModels.length > 0 && (
+                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      <input
+                        value={modelFilter}
+                        onChange={(e) => setModelFilter(e.target.value)}
+                        placeholder="关键词筛选模型 (如 deepseek / qwen)"
+                        style={{ width: 210, padding: "4px 10px", fontSize: "0.8rem" }}
+                      />
+                      <button
+                        type="button"
+                        className="chip"
+                        style={{ padding: "4px 10px", fontSize: "0.76rem" }}
+                        disabled={detectingModels || filteredDiscovered.length === 0}
+                        onClick={() => void handleDetectModels(true)}
+                      >
+                        实测筛选结果 ({Math.min(8, filteredDiscovered.length)})
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {detectResult.probed.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                    {detectResult.probed.map((p) => {
+                      const active = llmConfig.model === p.model;
+                      return (
+                        <button
+                          key={p.model}
+                          type="button"
+                          title={p.error || `延迟 ${p.latency_ms}ms，点击选用`}
+                          onClick={() => updateLlmConfig({ ...llmConfig, model: p.model })}
+                          className="chip"
+                          style={{
+                            padding: "4px 10px",
+                            fontSize: "0.76rem",
+                            borderColor: p.usable ? "#10b981" : "#f87171",
+                            background: active ? "#065f46" : p.usable ? "#ecfdf5" : "#fef2f2",
+                            color: active ? "#ffffff" : p.usable ? "#065f46" : "#991b1b",
+                          }}
+                        >
+                          {p.usable ? `✅ ${p.model} (${p.latency_ms}ms)` : `❌ ${p.model}`}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {filteredDiscovered.length > 0 && (
+                  <div style={{ maxHeight: 110, overflowY: "auto", display: "flex", flexWrap: "wrap", gap: 5, paddingTop: 4, borderTop: "1px dashed var(--line)" }}>
+                    {filteredDiscovered.map((mid) => (
+                      <button
+                        key={mid}
+                        type="button"
+                        className={`chip ${llmConfig.model === mid ? "active" : ""}`}
+                        style={{ padding: "2px 8px", fontSize: "0.74rem" }}
+                        onClick={() => updateLlmConfig({ ...llmConfig, model: mid })}
+                      >
+                        {mid}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 

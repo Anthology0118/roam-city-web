@@ -1,3 +1,4 @@
+import asyncio
 from datetime import date
 import json
 import re
@@ -441,6 +442,107 @@ async def test_llm_connection(req: TestLlmRequest) -> dict:
             "latency_ms": latency_ms,
             "model": model,
             "available_models": available_models,
+            "error": str(exc) or exc.__class__.__name__,
+        }
+
+
+class DetectModelsRequest(BaseModel):
+    api_key: str | None = Field(default=None, max_length=256)
+    base_url: str | None = Field(default=None, max_length=256)
+    probe: bool = True
+    probe_models: list[str] | None = None
+    max_probe: int = Field(default=8, ge=1, le=20)
+
+
+async def _probe_single_model(
+    client: httpx.AsyncClient,
+    sem: asyncio.Semaphore,
+    base_url: str,
+    api_key: str,
+    model_id: str,
+) -> dict:
+    async with sem:
+        t0 = time.perf_counter()
+        try:
+            resp = await client.post(
+                f"{base_url}/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "model": model_id,
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "max_tokens": 8,
+                    "temperature": 0,
+                },
+            )
+            ms = int((time.perf_counter() - t0) * 1000)
+            if resp.status_code < 400:
+                return {"model": model_id, "usable": True, "latency_ms": ms, "error": None}
+            return {"model": model_id, "usable": False, "latency_ms": ms, "error": f"HTTP {resp.status_code}: {resp.text[:140]}"}
+        except Exception as exc:
+            ms = int((time.perf_counter() - t0) * 1000)
+            return {"model": model_id, "usable": False, "latency_ms": ms, "error": str(exc) or exc.__class__.__name__}
+
+
+@router.post("/agent/detect-models")
+async def detect_llm_models(req: DetectModelsRequest) -> dict:
+    """Discover all models exposed by an OpenAI-compatible endpoint and concurrently probe usability."""
+    settings = get_settings()
+    api_key = (req.api_key or settings.llm_api_key or "").strip()
+    base_url = (req.base_url or settings.llm_base_url or "").strip().rstrip("/")
+
+    if not api_key:
+        return {"ok": False, "models": [], "probed": [], "usable_models": [], "error": "请先填写 API Key"}
+    if not base_url.startswith(("http://", "https://")):
+        return {"ok": False, "models": [], "probed": [], "usable_models": [], "error": "Base URL 必须以 http:// 或 https:// 开头"}
+
+    discovered: list[str] = []
+    fetch_error: str | None = None
+
+    try:
+        async with httpx.AsyncClient(timeout=12.0) as client:
+            m_resp = await client.get(f"{base_url}/models", headers={"Authorization": f"Bearer {api_key}"})
+            if m_resp.status_code >= 400:
+                fetch_error = f"/models 返回 HTTP {m_resp.status_code}: {m_resp.text[:180]}"
+            else:
+                payload = m_resp.json()
+                raw_list = payload.get("data") if isinstance(payload, dict) else payload
+                if isinstance(raw_list, list):
+                    seen: set[str] = set()
+                    for item in raw_list:
+                        mid = item.get("id") if isinstance(item, dict) else str(item)
+                        if mid and str(mid) not in seen:
+                            seen.add(str(mid))
+                            discovered.append(str(mid))
+
+            probed: list[dict] = []
+            if req.probe:
+                targets = (
+                    [m.strip() for m in req.probe_models if m.strip()][: req.max_probe]
+                    if req.probe_models
+                    else discovered[: req.max_probe]
+                )
+                if targets:
+                    sem = asyncio.Semaphore(5)
+                    probed = await asyncio.gather(
+                        *(_probe_single_model(client, sem, base_url, api_key, mid) for mid in targets)
+                    )
+
+            usable_models = [p["model"] for p in probed if p["usable"]]
+            return {
+                "ok": len(discovered) > 0 or len(usable_models) > 0,
+                "total_models": len(discovered),
+                "models": discovered,
+                "probed": probed,
+                "usable_models": usable_models,
+                "error": fetch_error if not discovered and not usable_models else None,
+            }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "total_models": len(discovered),
+            "models": discovered,
+            "probed": [],
+            "usable_models": [],
             "error": str(exc) or exc.__class__.__name__,
         }
 

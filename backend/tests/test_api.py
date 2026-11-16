@@ -205,3 +205,7 @@ async def test_rag_modes_ingest_and_llm_test_endpoint():
             t_bad_url = await client.post("/api/agent/test-llm", json={"api_key": "sk-test", "base_url": "ftp://bad"})
             assert t_bad_url.status_code == 200
             assert t_bad_url.json()["ok"] is False
+
+            d_empty = await client.post("/api/agent/detect-models", json={"api_key": "", "base_url": "https://api.deepseek.com/v1"})
+            assert d_empty.status_code == 200
+            assert d_empty.json()["ok"] is False
