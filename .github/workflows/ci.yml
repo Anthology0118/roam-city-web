@@ -25,6 +25,8 @@ jobs:
         run: pytest -v
       - name: Run offline RAG evaluation benchmark
         run: PYTHONPATH=. python -m eval.eval_rag
+      - name: Run offline Agent constraint & grounding benchmark
+        run: PYTHONPATH=. python -m eval.eval_agent
 
   frontend:
     runs-on: ubuntu-latest

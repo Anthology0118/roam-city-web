@@ -15,6 +15,12 @@ export function App() {
     spotId: "gugong",
     count: 1,
   });
+  const [activeGuideId, setActiveGuideId] = useState<string | undefined>(undefined);
+  const [mapTransfer, setMapTransfer] = useState<{
+    spotIds: string[];
+    days: number;
+    budget: number | null;
+  } | null>(null);
 
   function applyDraft(draft: BookingDraft) {
     setBookingPrefill({ spotId: draft.spot_id, count: draft.suggested_count });
@@ -80,9 +86,24 @@ export function App() {
       </header>
 
       <main className="container">
-        {tab === "agent" && <AgentPlanner onApplyBookingDraft={applyDraft} />}
+        {tab === "agent" && (
+          <AgentPlanner
+            onApplyBookingDraft={applyDraft}
+            onOpenGuide={(gid) => {
+              setActiveGuideId(gid);
+              setTab("guide");
+            }}
+            onTransferToMap={(spotIds, days, budget) => {
+              setMapTransfer({ spotIds, days, budget });
+              setTab("map");
+            }}
+          />
+        )}
         {tab === "map" && (
           <MapStudio
+            initialSpotIds={mapTransfer?.spotIds}
+            initialDays={mapTransfer?.days}
+            initialBudget={mapTransfer?.budget}
             onBookSpot={(spotId) => {
               setBookingPrefill({ spotId, count: 1 });
               setTab("booking");
@@ -97,7 +118,7 @@ export function App() {
             }}
           />
         )}
-        {tab === "guide" && <GuideRag />}
+        {tab === "guide" && <GuideRag initialGuideId={activeGuideId} />}
         {tab === "gallery" && <GalleryView />}
         {tab === "booking" && (
           <BookingDesk initialSpotId={bookingPrefill.spotId} initialCount={bookingPrefill.count} />

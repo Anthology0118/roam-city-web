@@ -4,11 +4,12 @@
 
 ## 核心架构与技术亮点
 
-1. **AI 行程规划 Agent（多轮对话记忆 + Function/Tool Calling + SSE）**
-   - `backend/app/agent/planner_agent.py`：支持多轮会话持久化（`ChatTurn`）与槽位继承，透明推送 `status -> tool_call -> tool_result -> plan -> citations -> booking_draft -> token -> done` 多阶段 SSE 事件流。
-   - 配置 `LLM_API_KEY` 后启用真实 **OpenAI-compatible Tool Calling** 循环（`search_spots` / `search_guides` / `plan_optimized_route` / `draft_booking`）；未配置 Key 时自动降级到本地确定性合成模式，零门槛可运行演示。
-2. **3D 中国地理坐标沙盘 + 确定性路径规划（Anti-Hallucination）**
-   - `frontend/src/components/ChinaRouteMap.tsx` & `MapStudio.tsx`：基于 `d3-geo` Mercator 投影与 **Three.js WebGL** 立体挤出渲染全国 34 省级地形、**36 个真实经纬度景区光柱** 与 **3D 二次贝塞尔航线飞线**，支持拖拽旋转/缩放、悬停立体抬升及从心愿单一键导入求解。
+1. **AI 行程规划 Agent（多轮记忆 + Query 改写 + 6 工具真流式调用 + Guardrail 自检）**
+   - `backend/app/agent/planner_agent.py`：支持多轮会话管理（增删改查 `ChatTurn`）、多轮指代 Query 改写、否定词地区排除（如“不去西北”）、出发地锚定、游览节奏控制与预算/余票 Guardrail 自检。
+   - 支持 `.env` 或前端「接入大模型 API」面板实时配置 OpenAI 兼容模型，启用 `stream: true` 真·首字流式 **Tool Calling**（`search_spots`、`hybrid_search_guides`、`optimize_route_2opt`、`prepare_booking_draft`、`manage_favorites`、`query_bookings`），异常时显式上报降级原因并切换本地兜底引擎。
+   - `backend/eval/eval_agent.py`（6 组多轮与约束评测集）：**零幻觉落地率 100.0%（6/6）**、**总体约束遵循率 100.0%（6/6）**。
+2. **3D 中国三级阶梯海拔/气候沙盘 + 确定性路径规划（Anti-Hallucination）**
+   - `frontend/src/components/ChinaRouteMap.tsx` & `chinaTerrain.ts`：基于 `d3-geo` Mercator 投影与 **Three.js WebGL** 渲染 `122×90` 网格立体浮雕地形，支持 **⛰️ 三级阶梯海拔高度** 与 **🌦️ 五大气候环境带** GPU 瞬时切换、**36 个真实经纬度景区光柱** 及 **3D 二次贝塞尔航线飞线**。
    - `backend/app/algo/route_planner.py`：基于 WGS-84 经纬度计算 **Haversine 球面距离**，使用 **最近邻贪心 + 2-opt 局部搜索** 在预算与每日时长约束下求解最优顺序，量化对比并展示节省里程。
 3. **Hybrid RAG 攻略检索与离线量化评测**
    - `backend/app/rag/retriever.py`：对 **8 篇攻略 / 17 个章节切片** 结合 **BM25 词法检索 + 384 维符号随机投影向量相似度** 并通过 **RRF（Reciprocal Rank Fusion）** 融合排序。
@@ -53,6 +54,10 @@ cd backend
 # RAG 离线量化评测（BM25 vs Vector vs Hybrid RRF）
 cd backend
 $env:PYTHONPATH="."; .\.venv\Scripts\python.exe -m eval.eval_rag
+
+# AI Agent 多轮约束与零幻觉离线评测
+cd backend
+$env:PYTHONPATH="."; .\.venv\Scripts\python.exe -m eval.eval_agent
 
 # 前端类型检查与生产构建
 cd frontend

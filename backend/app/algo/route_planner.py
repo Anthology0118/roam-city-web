@@ -35,18 +35,29 @@ def _total_path_km(order: list[SpotNode]) -> float:
     )
 
 
-def solve_tsp_2opt(nodes: list[SpotNode]) -> tuple[list[SpotNode], float, float]:
+def solve_tsp_2opt(
+    nodes: list[SpotNode],
+    start_spot_id: str | None = None,
+) -> tuple[list[SpotNode], float, float]:
     """Order nodes using Greedy Nearest Neighbor followed by 2-opt local improvement.
 
-    Returns (ordered_nodes, initial_greedy_km, optimized_km).
+    If start_spot_id matches a node, lock it as the departure anchor; otherwise start
+    from the highest-rated node. Returns (ordered_nodes, initial_greedy_km, optimized_km).
     """
     if len(nodes) <= 2:
-        dist = _total_path_km(nodes)
-        return list(nodes), round(dist, 2), round(dist, 2)
+        if start_spot_id and len(nodes) == 2 and nodes[1].id == start_spot_id:
+            ordered = [nodes[1], nodes[0]]
+        else:
+            ordered = list(nodes)
+        dist = _total_path_km(ordered)
+        return ordered, round(dist, 2), round(dist, 2)
 
-    # Start from the highest-rated spot to keep the opening anchor strong
     remaining = sorted(nodes, key=lambda n: (-n.rating, n.price))
-    route = [remaining.pop(0)]
+    if start_spot_id:
+        anchor_idx = next((i for i, n in enumerate(remaining) if n.id == start_spot_id), None)
+        route = [remaining.pop(anchor_idx if anchor_idx is not None else 0)]
+    else:
+        route = [remaining.pop(0)]
     while remaining:
         last = route[-1]
         nearest_idx = min(
@@ -81,13 +92,19 @@ def build_itinerary(
     days: int = 3,
     budget: int | None = None,
     max_hours_per_day: float = 8.0,
+    start_spot_id: str | None = None,
 ) -> dict:
     """Select budget-feasible spots and partition the 2-opt optimized sequence across days."""
-    # Greedy selection prioritizing rating & value within ticket budget
+    # Ensure explicit departure anchor is included first if present and affordable
+    ordered_candidates = sorted(candidates, key=lambda n: (-n.rating, n.price))
+    if start_spot_id:
+        ordered_candidates.sort(key=lambda n: (0 if n.id == start_spot_id else 1, -n.rating, n.price))
+
     selected: list[SpotNode] = []
     ticket_cost = 0
-    for node in sorted(candidates, key=lambda n: (-n.rating, n.price)):
-        if len(selected) >= max(1, days * 2):
+    max_stops = max(1, days) if max_hours_per_day <= 6.5 else max(1, days * 2)
+    for node in ordered_candidates:
+        if len(selected) >= max_stops:
             break
         if budget is not None and ticket_cost + node.price > budget:
             continue
@@ -99,7 +116,7 @@ def build_itinerary(
         selected = [cheapest]
         ticket_cost = cheapest.price
 
-    ordered, greedy_km, optimized_km = solve_tsp_2opt(selected)
+    ordered, greedy_km, optimized_km = solve_tsp_2opt(selected, start_spot_id=start_spot_id)
 
     # Partition ordered stops into daily buckets respecting max_hours_per_day
     day_buckets: list[list[dict]] = [[] for _ in range(max(1, days))]

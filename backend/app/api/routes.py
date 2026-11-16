@@ -5,7 +5,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.planner_agent import stream_travel_agent
@@ -121,6 +121,7 @@ class OptimizeRouteRequest(BaseModel):
     days: int = Field(default=3, ge=1, le=7)
     budget: int | None = Field(default=None, ge=0)
     category: str | None = None
+    start_spot_id: str | None = None
 
 
 @router.post("/planner/optimize")
@@ -152,7 +153,7 @@ async def optimize_route(req: OptimizeRouteRequest, db: AsyncSession = Depends(g
         )
         for s in candidates
     ]
-    return build_itinerary(nodes, days=req.days, budget=req.budget)
+    return build_itinerary(nodes, days=req.days, budget=req.budget, start_spot_id=req.start_spot_id)
 
 
 class CreateBookingRequest(BaseModel):
@@ -294,15 +295,47 @@ async def cancel_booking(order_id: str, db: AsyncSession = Depends(get_db)) -> d
 class ChatRequest(BaseModel):
     query: str = Field(min_length=1, max_length=500)
     session_id: str | None = Field(default=None, max_length=64)
+    llm_api_key: str | None = Field(default=None, max_length=256)
+    llm_base_url: str | None = Field(default=None, max_length=256)
+    llm_model: str | None = Field(default=None, max_length=128)
 
 
 @router.post("/agent/chat")
 async def agent_chat(req: ChatRequest, db: AsyncSession = Depends(get_db)) -> StreamingResponse:
+    overrides = {
+        "api_key": req.llm_api_key,
+        "base_url": req.llm_base_url,
+        "model": req.llm_model,
+    }
     return StreamingResponse(
-        stream_travel_agent(req.query, db, session_id=req.session_id),
+        stream_travel_agent(req.query, db, session_id=req.session_id, llm_overrides=overrides),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.get("/agent/sessions")
+async def list_chat_sessions(db: AsyncSession = Depends(get_db)) -> dict:
+    rows = (
+        await db.execute(select(ChatTurn).order_by(ChatTurn.id.asc()))
+    ).scalars().all()
+    grouped: dict[str, dict] = {}
+    for r in rows:
+        entry = grouped.get(r.session_id)
+        if not entry:
+            entry = {
+                "session_id": r.session_id,
+                "turns": 0,
+                "title": r.content[:40] if r.role == "user" else "AI 行程会话",
+                "updated_at": r.created_at.isoformat(),
+            }
+            grouped[r.session_id] = entry
+        entry["turns"] += 1
+        entry["updated_at"] = r.created_at.isoformat()
+        if r.role == "user" and entry["title"] == "AI 行程会话":
+            entry["title"] = r.content[:40]
+    items = sorted(grouped.values(), key=lambda x: x["updated_at"], reverse=True)
+    return {"items": items[:20]}
 
 
 @router.get("/agent/sessions/{session_id}")
@@ -317,6 +350,13 @@ async def get_chat_session(session_id: str, db: AsyncSession = Depends(get_db)) 
             for t in turns
         ],
     }
+
+
+@router.delete("/agent/sessions/{session_id}")
+async def delete_chat_session(session_id: str, db: AsyncSession = Depends(get_db)) -> dict:
+    res = await db.execute(delete(ChatTurn).where(ChatTurn.session_id == session_id))
+    await db.commit()
+    return {"session_id": session_id, "deleted_turns": res.rowcount or 0}
 
 
 @router.get("/favorites")

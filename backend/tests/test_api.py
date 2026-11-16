@@ -3,8 +3,9 @@ import uuid
 from datetime import date, timedelta
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import update
+from sqlalchemy import select, update
 
+from app.agent.planner_agent import _exec_tool, parse_intent, rewrite_rag_query
 from app.db.models import Spot
 from app.db.session import AsyncSessionLocal
 from app.main import app, lifespan
@@ -84,6 +85,14 @@ async def test_api_spots_rag_booking_multiturn_and_favorites():
             assert hist.status_code == 200
             assert len(hist.json()["turns"]) >= 4
 
+            sessions_list = await client.get("/api/agent/sessions")
+            assert sessions_list.status_code == 200
+            assert any(item["session_id"] == sid for item in sessions_list.json()["items"])
+
+            deleted = await client.delete(f"/api/agent/sessions/{sid}")
+            assert deleted.status_code == 200
+            assert deleted.json()["deleted_turns"] >= 4
+
 
 @pytest.mark.asyncio
 async def test_concurrent_booking_never_oversells():
@@ -125,3 +134,32 @@ async def test_concurrent_booking_never_oversells():
             async with AsyncSessionLocal() as db:
                 await db.execute(update(Spot).where(Spot.id == "potala").values(daily_stock=orig_stock))
                 await db.commit()
+
+
+@pytest.mark.asyncio
+async def test_agent_constraints_rewrite_and_extended_tools():
+    async with lifespan(app):
+        intent1 = parse_intent("从西安出发去人文历史景点玩3天，不要去西北和西藏，只要免费景点")
+        assert intent1["days"] == 3
+        assert intent1["start_city"] == "西安"
+        assert intent1["free_only"] is True
+        assert intent1["budget"] == 0
+        assert "西北" in intent1["exclude_keywords"]
+        assert "西藏" in intent1["exclude_keywords"]
+
+        rewritten = rewrite_rag_query("那边避坑怎么说", {"keywords": ["茶卡盐湖"], "category": "自然山水"}, [object()])
+        assert "茶卡盐湖" in rewritten
+
+        async with AsyncSessionLocal() as db:
+            all_spots = list((await db.execute(select(Spot))).scalars().all())
+            res_fav, _ = await _exec_tool("manage_favorites", {"action": "list"}, db, all_spots)
+            assert "favorite_spot_ids" in res_fav
+
+            res_draft, effects = await _exec_tool(
+                "prepare_booking_draft", {"spot_id": "gugong", "suggested_count": 2}, db, all_spots
+            )
+            assert res_draft["status"] == "ready"
+            assert effects["booking_draft"]["suggested_count"] == 2  # type: ignore[index]
+
+            res_orders, _ = await _exec_tool("query_bookings", {}, db, all_spots)
+            assert "orders" in res_orders

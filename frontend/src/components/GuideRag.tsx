@@ -2,19 +2,31 @@ import { useEffect, useState } from "react";
 import { fetchGuides, searchGuidesRag } from "../api/client";
 import type { GuideDoc, GuideSearchHit } from "../types";
 
-export function GuideRag() {
+interface Props {
+  initialGuideId?: string;
+}
+
+export function GuideRag({ initialGuideId }: Props) {
   const [query, setQuery] = useState("茶卡盐湖 拍照 避坑 风速");
   const [hits, setHits] = useState<GuideSearchHit[]>([]);
   const [guides, setGuides] = useState<GuideDoc[]>([]);
-  const [activeGuideId, setActiveGuideId] = useState<string>("");
+  const [activeGuideId, setActiveGuideId] = useState<string>(initialGuideId || "");
 
   useEffect(() => {
     fetchGuides().then((items) => {
       setGuides(items);
-      if (items[0]) setActiveGuideId(items[0].id);
+      if (initialGuideId && items.some((g) => g.id === initialGuideId)) {
+        setActiveGuideId(initialGuideId);
+      } else if (items[0]) {
+        setActiveGuideId((prev) => prev || items[0].id);
+      }
     });
     void runSearch("茶卡盐湖 拍照 避坑 风速");
   }, []);
+
+  useEffect(() => {
+    if (initialGuideId) setActiveGuideId(initialGuideId);
+  }, [initialGuideId]);
 
   async function runSearch(q: string) {
     if (!q.trim()) return;

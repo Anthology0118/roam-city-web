@@ -1,0 +1,60 @@
+[
+  {
+    "id": "ag-01",
+    "turns": ["周末2天预算300看自然山水"],
+    "expected_days": 2,
+    "max_budget": 300,
+    "expected_category": "自然山水",
+    "must_exclude_provinces": [],
+    "expect_booking_draft": false
+  },
+  {
+    "id": "ag-02",
+    "turns": ["想去自然山水玩3天，不要去西北和西藏"],
+    "expected_days": 3,
+    "max_budget": null,
+    "expected_category": "自然山水",
+    "must_exclude_provinces": ["青海", "甘肃", "新疆", "宁夏", "陕西", "西藏"],
+    "expect_booking_draft": false
+  },
+  {
+    "id": "ag-03",
+    "turns": ["只看免费景点，预算0元玩2天"],
+    "expected_days": 2,
+    "max_budget": 0,
+    "expected_category": null,
+    "must_exclude_provinces": [],
+    "expect_booking_draft": false
+  },
+  {
+    "id": "ag-04",
+    "turns": ["从西安出发去人文历史景点玩3天，顺便预约2张门票"],
+    "expected_days": 3,
+    "max_budget": null,
+    "expected_category": "人文历史",
+    "expected_start_city": "西安",
+    "must_exclude_provinces": [],
+    "expect_booking_draft": true,
+    "expected_count": 2
+  },
+  {
+    "id": "ag-05",
+    "turns": ["预算400去云南玩3天", "预算放宽到800，顺便预约门票"],
+    "expected_days": 3,
+    "max_budget": 800,
+    "expected_category": null,
+    "must_exclude_provinces": [],
+    "expect_booking_draft": true,
+    "expected_count": 1
+  },
+  {
+    "id": "ag-06",
+    "turns": ["带娃去三亚3天，不要太累", "那边避坑攻略怎么说"],
+    "expected_days": 3,
+    "max_budget": null,
+    "expected_category": "海岛海滨",
+    "must_exclude_provinces": [],
+    "expect_booking_draft": false,
+    "max_hours_per_day": 6.0
+  }
+]

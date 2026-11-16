@@ -1,10 +1,14 @@
 import type {
+  AgentDoneMetrics,
+  AgentSessionSummary,
+  AgentTraceItem,
   BookingDraft,
   BookingOrder,
   CitationItem,
   GuideDoc,
   GuideSearchHit,
   ItineraryPlan,
+  LlmConfig,
   Spot,
 } from "../types";
 
@@ -71,6 +75,7 @@ export async function optimizeRoute(payload: {
   spot_ids?: string[];
   days: number;
   budget?: number | null;
+  start_spot_id?: string | null;
 }): Promise<ItineraryPlan> {
   const res = await fetch("/api/planner/optimize", {
     method: "POST",
@@ -96,25 +101,52 @@ export async function toggleFavorite(spotId: string): Promise<{ spot_id: string;
   return data;
 }
 
+export async function fetchAgentSessions(): Promise<AgentSessionSummary[]> {
+  const res = await fetch("/api/agent/sessions");
+  if (!res.ok) throw new Error("获取会话历史失败");
+  const data = await res.json();
+  return data.items || [];
+}
+
+export async function fetchAgentSessionTurns(
+  sessionId: string
+): Promise<{ session_id: string; turns: Array<{ role: "user" | "assistant"; content: string; created_at: string }> }> {
+  const res = await fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}`);
+  if (!res.ok) throw new Error("加载会话记录失败");
+  return res.json();
+}
+
+export async function deleteAgentSession(sessionId: string): Promise<void> {
+  const res = await fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("删除会话失败");
+}
+
 export interface AgentStreamCallbacks {
   onStatus: (msg: string, meta?: { session_id?: string; turn?: number }) => void;
-  onToolEvent: (label: string) => void;
+  onToolEvent: (trace: AgentTraceItem) => void;
   onPlan: (plan: ItineraryPlan) => void;
   onCitations: (items: CitationItem[]) => void;
   onBookingDraft: (draft: BookingDraft) => void;
   onToken: (delta: string) => void;
-  onDone: (metrics: { session_id?: string; ttft_ms: number; total_ms: number; mode: string }) => void;
+  onDone: (metrics: AgentDoneMetrics) => void;
 }
 
 export async function streamAgentChat(
   query: string,
   cb: AgentStreamCallbacks,
-  sessionId?: string | null
+  options?: { sessionId?: string | null; llm?: LlmConfig }
 ): Promise<void> {
+  const llm = options?.llm;
   const res = await fetch("/api/agent/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query, session_id: sessionId || undefined }),
+    body: JSON.stringify({
+      query,
+      session_id: options?.sessionId || undefined,
+      llm_api_key: llm?.apiKey?.trim() || undefined,
+      llm_base_url: llm?.baseUrl?.trim() || undefined,
+      llm_model: llm?.model?.trim() || undefined,
+    }),
   });
   if (!res.ok || !res.body) {
     throw new Error("Agent 流式连接失败");
@@ -123,6 +155,7 @@ export async function streamAgentChat(
   const reader = res.body.getReader();
   const decoder = new TextDecoder("utf-8");
   let buffer = "";
+  let traceSeq = 0;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -151,13 +184,34 @@ export async function streamAgentChat(
           });
           break;
         case "tool_call":
-          cb.onToolEvent(`调用工具 ${payload.tool}(${JSON.stringify(payload.args || {})})`);
+          cb.onToolEvent({
+            id: `tr-${traceSeq++}`,
+            kind: "call",
+            tool: payload.tool || "tool",
+            label: `调用工具 ${payload.tool}`,
+            detail: payload.args || {},
+          });
           break;
-        case "tool_result":
-          cb.onToolEvent(
-            `${payload.tool}: ${typeof payload.summary === "string" ? payload.summary : JSON.stringify(payload.summary)}`
-          );
+        case "tool_result": {
+          const tName = payload.tool || "result";
+          const kind: AgentTraceItem["kind"] =
+            tName === "agent_reflection"
+              ? "reflection"
+              : tName === "query_rewrite"
+                ? "rewrite"
+                : tName === "llm_guard"
+                  ? "guard"
+                  : "result";
+          cb.onToolEvent({
+            id: `tr-${traceSeq++}`,
+            kind,
+            tool: tName,
+            label: typeof payload.summary === "string" ? payload.summary : JSON.stringify(payload.summary),
+            latencyMs: typeof payload.latency_ms === "number" ? payload.latency_ms : undefined,
+            detail: payload.detail ?? payload.summary,
+          });
           break;
+        }
         case "plan":
           cb.onPlan(payload as ItineraryPlan);
           break;
@@ -171,7 +225,7 @@ export async function streamAgentChat(
           cb.onToken(payload.text || "");
           break;
         case "done":
-          cb.onDone(payload);
+          cb.onDone(payload as AgentDoneMetrics);
           break;
       }
     }

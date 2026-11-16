@@ -5,14 +5,18 @@ import { ChinaRouteMap } from "./ChinaRouteMap";
 
 interface Props {
   onBookSpot: (spotId: string) => void;
+  initialSpotIds?: string[];
+  initialDays?: number;
+  initialBudget?: number | null;
 }
 
-export function MapStudio({ onBookSpot }: Props) {
+export function MapStudio({ onBookSpot, initialSpotIds, initialDays, initialBudget }: Props) {
+  const defaultIds = initialSpotIds && initialSpotIds.length > 0 ? initialSpotIds : ["gugong", "xian", "jiuzhaigou", "lijiang"];
   const [spots, setSpots] = useState<Spot[]>([]);
-  const [selectedIds, setSelectedIds] = useState<string[]>(["gugong", "xian", "jiuzhaigou", "lijiang"]);
+  const [selectedIds, setSelectedIds] = useState<string[]>(defaultIds);
   const [favCount, setFavCount] = useState(0);
-  const [days, setDays] = useState(3);
-  const [budget, setBudget] = useState<string>("");
+  const [days, setDays] = useState(initialDays || 3);
+  const [budget, setBudget] = useState<string>(initialBudget != null ? String(initialBudget) : "");
   const [plan, setPlan] = useState<ItineraryPlan | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState("");
@@ -20,10 +24,21 @@ export function MapStudio({ onBookSpot }: Props) {
   useEffect(() => {
     fetchSpots().then((items) => {
       setSpots(items);
-      void runOptimize(["gugong", "xian", "jiuzhaigou", "lijiang"], 3, "");
+      void runOptimize(defaultIds, initialDays || 3, initialBudget != null ? String(initialBudget) : "");
     });
     fetchFavorites().then((ids) => setFavCount(ids.length)).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (initialSpotIds && initialSpotIds.length > 0) {
+      const nextDays = initialDays || days;
+      const nextBudget = initialBudget != null ? String(initialBudget) : "";
+      setSelectedIds(initialSpotIds);
+      if (initialDays) setDays(initialDays);
+      setBudget(nextBudget);
+      void runOptimize(initialSpotIds, nextDays, nextBudget);
+    }
+  }, [initialSpotIds, initialDays, initialBudget]);
 
   async function importFavorites() {
     setErr("");

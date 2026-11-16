@@ -100,3 +100,39 @@ export interface GuideDoc {
     content: string;
   }[];
 }
+
+export interface AgentSessionSummary {
+  session_id: string;
+  turns: number;
+  title: string;
+  updated_at: string;
+}
+
+export interface AgentTraceItem {
+  id: string;
+  kind: "call" | "result" | "reflection" | "rewrite" | "guard";
+  tool: string;
+  label: string;
+  latencyMs?: number;
+  detail?: unknown;
+}
+
+export interface LlmConfig {
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+}
+
+export interface AgentDoneMetrics {
+  session_id?: string;
+  ttft_ms: number;
+  total_ms: number;
+  mode: string;
+  model?: string;
+  fallback_reason?: string | null;
+  usage?: {
+    prompt_tokens?: number;
+    completion_tokens?: number;
+    total_tokens?: number;
+  } | null;
+}
