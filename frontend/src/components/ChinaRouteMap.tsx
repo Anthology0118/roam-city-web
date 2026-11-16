@@ -684,89 +684,93 @@ export function ChinaRouteMap({
             background: "rgba(7, 25, 35, 0.86)",
             border: "1px solid rgba(103, 232, 249, 0.38)",
             borderRadius: 999,
-            padding: "4px 12px",
-            fontSize: "0.78rem",
+            padding: "3px 10px",
+            fontSize: "0.73rem",
             color: "#cffafe",
             fontWeight: 600,
+            maxWidth: "100%",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
           }}
         >
           {hoverTerrain
-            ? `⛰️ ${hoverTerrain.province} · 海拔 ~${hoverTerrain.elevMeters}m${provAvg ? `（省均 ${provAvg}m）` : ""} · 🌦️ ${hoverTerrain.climateLabel}`
+            ? `⛰️ ${hoverTerrain.province} · 海拔 ~${hoverTerrain.elevMeters}m${provAvg ? `（省均 ${provAvg}m）` : ""} · ${hoverTerrain.climateLabel}`
             : colorMode === "climate"
-              ? "🌦️ 3D 中国地形 + 气候环境沙盘 (五大气候区植被晕渲 + 三级阶梯海拔)"
-              : "⛰️ 3D 中国三级阶梯海拔地形沙盘 (Three.js · 西高东低浮雕 + 贝塞尔航线)"}
+              ? "🌦️ 3D 地形 + 气候环境沙盘"
+              : "⛰️ 3D 三级阶梯海拔沙盘"}
         </div>
 
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", pointerEvents: "auto" }}>
+        <div style={{ display: "flex", gap: 4, flexWrap: "wrap", pointerEvents: "auto" }}>
           <button
             type="button"
             className="chip"
             style={{
-              padding: "3px 10px",
-              fontSize: "0.76rem",
+              padding: "2px 8px",
+              fontSize: "0.72rem",
               background: colorMode === "climate" ? "#059669" : "rgba(7, 25, 35, 0.85)",
               color: "#ecfdf5",
               borderColor: colorMode === "climate" ? "#34d399" : "rgba(103, 232, 249, 0.4)",
             }}
             onClick={() => setColorMode("climate")}
           >
-            🌦️ 气候环境
+            气候
           </button>
           <button
             type="button"
             className="chip"
             style={{
-              padding: "3px 10px",
-              fontSize: "0.76rem",
+              padding: "2px 8px",
+              fontSize: "0.72rem",
               background: colorMode === "elevation" ? "#b45309" : "rgba(7, 25, 35, 0.85)",
               color: "#fef3c7",
               borderColor: colorMode === "elevation" ? "#fbbf24" : "rgba(103, 232, 249, 0.4)",
             }}
             onClick={() => setColorMode("elevation")}
           >
-            ⛰️ 海拔高度
+            海拔
           </button>
           <button
             type="button"
             className="chip"
             style={{
-              padding: "3px 10px",
-              fontSize: "0.76rem",
+              padding: "2px 8px",
+              fontSize: "0.72rem",
               background: autoRotate ? "#0e7490" : "rgba(7, 25, 35, 0.85)",
               color: "#e0f2fe",
               borderColor: "rgba(103, 232, 249, 0.4)",
             }}
             onClick={() => setAutoRotate((r) => !r)}
           >
-            {autoRotate ? "⏸ 暂停旋转" : "🔄 自动旋转"}
+            {autoRotate ? "⏸ 停转" : "🔄 旋转"}
           </button>
           <button
             type="button"
             className="chip"
             style={{
-              padding: "3px 10px",
-              fontSize: "0.76rem",
+              padding: "2px 8px",
+              fontSize: "0.72rem",
               background: "rgba(7, 25, 35, 0.85)",
               color: "#e0f2fe",
               borderColor: "rgba(103, 232, 249, 0.4)",
             }}
             onClick={() => setCameraPreset("3d")}
           >
-            3D 俯瞰
+            3D
           </button>
           <button
             type="button"
             className="chip"
             style={{
-              padding: "3px 10px",
-              fontSize: "0.76rem",
+              padding: "2px 8px",
+              fontSize: "0.72rem",
               background: "rgba(7, 25, 35, 0.85)",
               color: "#e0f2fe",
               borderColor: "rgba(103, 232, 249, 0.4)",
             }}
             onClick={() => setCameraPreset("top")}
           >
-            顶视图
+            顶视
           </button>
           <button
             type="button"

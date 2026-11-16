@@ -86,7 +86,7 @@ export function App() {
       </header>
 
       <main className="container">
-        {tab === "agent" && (
+        <div style={{ display: tab === "agent" ? "block" : "none" }}>
           <AgentPlanner
             onApplyBookingDraft={applyDraft}
             onOpenGuide={(gid) => {
@@ -98,7 +98,7 @@ export function App() {
               setTab("map");
             }}
           />
-        )}
+        </div>
         {tab === "map" && (
           <MapStudio
             initialSpotIds={mapTransfer?.spotIds}

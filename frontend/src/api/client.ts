@@ -158,6 +158,42 @@ export async function testLlmConnection(llm: LlmConfig): Promise<LlmTestResult> 
   return data as LlmTestResult;
 }
 
+export async function fetchSavedLlmConfig(): Promise<{
+  has_api_key: boolean;
+  api_key_masked: string;
+  base_url: string;
+  model: string;
+}> {
+  const res = await fetch("/api/agent/llm-config");
+  if (!res.ok) throw new Error("获取配置失败");
+  return res.json();
+}
+
+export async function saveLlmConfig(llm: LlmConfig): Promise<{
+  saved: boolean;
+  has_api_key: boolean;
+  api_key_masked: string;
+  base_url: string;
+  model: string;
+}> {
+  const res = await fetch("/api/agent/llm-config", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      api_key: llm.apiKey.trim(),
+      base_url: llm.baseUrl.trim(),
+      model: llm.model.trim(),
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "保存配置失败");
+  return data;
+}
+
+export async function clearSavedLlmConfig(): Promise<void> {
+  await fetch("/api/agent/llm-config", { method: "DELETE" });
+}
+
 export async function fetchAgentSessions(): Promise<AgentSessionSummary[]> {
   const res = await fetch("/api/agent/sessions");
   if (!res.ok) throw new Error("获取会话历史失败");
@@ -165,9 +201,12 @@ export async function fetchAgentSessions(): Promise<AgentSessionSummary[]> {
   return data.items || [];
 }
 
-export async function fetchAgentSessionTurns(
-  sessionId: string
-): Promise<{ session_id: string; turns: Array<{ role: "user" | "assistant"; content: string; created_at: string }> }> {
+export async function fetchAgentSessionTurns(sessionId: string): Promise<{
+  session_id: string;
+  turns: Array<{ role: "user" | "assistant"; content: string; created_at: string }>;
+  last_plan?: ItineraryPlan | null;
+  last_citations?: CitationItem[];
+}> {
   const res = await fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}`);
   if (!res.ok) throw new Error("加载会话记录失败");
   return res.json();

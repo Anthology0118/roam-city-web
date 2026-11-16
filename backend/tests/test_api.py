@@ -6,7 +6,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import delete, select, update
 
 from app.agent.planner_agent import _exec_tool, parse_intent, rewrite_rag_query
-from app.db.models import GuideChunk, Spot
+from app.db.models import AppSetting, GuideChunk, Spot
 from app.db.session import AsyncSessionLocal
 from app.main import app, lifespan
 
@@ -84,6 +84,8 @@ async def test_api_spots_rag_booking_multiturn_and_favorites():
             hist = await client.get(f"/api/agent/sessions/{sid}")
             assert hist.status_code == 200
             assert len(hist.json()["turns"]) >= 4
+            assert hist.json()["last_plan"] is not None
+            assert len(hist.json()["last_citations"]) >= 1
 
             sessions_list = await client.get("/api/agent/sessions")
             assert sessions_list.status_code == 200
@@ -197,15 +199,38 @@ async def test_rag_modes_ingest_and_llm_test_endpoint():
                 await db.execute(delete(GuideChunk).where(GuideChunk.guide_id == gid))
                 await db.commit()
 
-            # LLM connectivity tester validation when key is absent
-            t_empty = await client.post("/api/agent/test-llm", json={"api_key": "", "base_url": "https://api.deepseek.com/v1"})
-            assert t_empty.status_code == 200
-            assert t_empty.json()["ok"] is False
+            # Save/Load/Delete LLM config persistence test (preserving any user config in DB)
+            async with AsyncSessionLocal() as db:
+                prev_settings = list((await db.execute(select(AppSetting))).scalars().all())
+                backup = [(r.key, r.value) for r in prev_settings]
+            try:
+                saved = await client.post(
+                    "/api/agent/llm-config",
+                    json={"api_key": "sk-test1234567890", "base_url": "https://api.deepseek.com/v1", "model": "deepseek-chat"},
+                )
+                assert saved.status_code == 200
+                assert saved.json()["saved"] is True
+                assert saved.json()["has_api_key"] is True
 
-            t_bad_url = await client.post("/api/agent/test-llm", json={"api_key": "sk-test", "base_url": "ftp://bad"})
-            assert t_bad_url.status_code == 200
-            assert t_bad_url.json()["ok"] is False
+                got = await client.get("/api/agent/llm-config")
+                assert got.status_code == 200
+                assert got.json()["has_api_key"] is True
+                assert got.json()["model"] == "deepseek-chat"
 
-            d_empty = await client.post("/api/agent/detect-models", json={"api_key": "", "base_url": "https://api.deepseek.com/v1"})
-            assert d_empty.status_code == 200
-            assert d_empty.json()["ok"] is False
+                cleared = await client.delete("/api/agent/llm-config")
+                assert cleared.status_code == 200
+                assert cleared.json()["cleared"] is True
+
+                t_bad_url = await client.post("/api/agent/test-llm", json={"api_key": "sk-test", "base_url": "ftp://bad"})
+                assert t_bad_url.status_code == 200
+                assert t_bad_url.json()["ok"] is False
+
+                d_empty = await client.post("/api/agent/detect-models", json={"api_key": "", "base_url": "https://api.deepseek.com/v1"})
+                assert d_empty.status_code == 200
+                assert d_empty.json()["ok"] is False
+            finally:
+                async with AsyncSessionLocal() as db:
+                    await db.execute(delete(AppSetting))
+                    for k, v in backup:
+                        db.add(AppSetting(key=k, value=v))
+                    await db.commit()

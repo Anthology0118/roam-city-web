@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.algo.route_planner import SpotNode, build_itinerary
 from app.core.config import get_settings
-from app.db.models import BookingOrder, ChatTurn, FavoriteSpot, Spot
+from app.db.models import AppSetting, BookingOrder, ChatTurn, FavoriteSpot, Spot
 from app.rag.retriever import hybrid_search_guides
 
 REGION_PROVINCES: dict[str, tuple[str, ...]] = {
@@ -195,8 +195,11 @@ def parse_intent(query: str, prev_intent: dict | None = None) -> dict:
     if any(w in query for w in ("不限主题", "都可以", "全部类型")):
         category = None
 
-    # 4. Exclusions ("不去西北和西藏", "不要去西北", "避开三亚", ignore pace phrases like "不要太累")
-    non_place_excludes = {"太累", "太赶", "紧张", "花钱", "太贵", "门票", "购物"}
+    # 4. Exclusions ("不去西北和西藏", "不要去西北", "避开三亚", ignore pace/spacing phrases)
+    non_place_excludes = {
+        "太累", "太赶", "紧张", "花钱", "太贵", "门票", "购物",
+        "相隔这么近", "隔这么近", "离这么近", "太近", "这么近", "很近", "太远", "这么远", "拥挤",
+    }
     excludes: list[str] = list(base.get("exclude_keywords", []))
     for ex_match in re.finditer(r"(?:不去|不要去|不要|避开|排除)\s*([\u4e00-\u9fff、和与及或]+)", query):
         raw_seg = ex_match.group(1)
@@ -349,13 +352,22 @@ async def _load_session_context(session: AsyncSession, session_id: str) -> tuple
     ).scalars().all()
     last_intent = None
     for r in reversed(rows):
-        if r.intent_json and r.intent_json != "{}":
+        if r.role == "user" and r.intent_json and r.intent_json != "{}":
             try:
                 last_intent = json.loads(r.intent_json)
                 break
             except Exception:
                 pass
     return list(rows), last_intent
+
+
+async def load_saved_llm_settings(session: AsyncSession) -> dict[str, str]:
+    rows = (
+        await session.execute(
+            select(AppSetting).where(AppSetting.key.in_(["llm_api_key", "llm_base_url", "llm_model"]))
+        )
+    ).scalars().all()
+    return {r.key: r.value for r in rows if r.value}
 
 
 async def _exec_tool(
@@ -556,10 +568,21 @@ async def stream_travel_agent(
     settings = get_settings()
     sid = session_id or uuid.uuid4().hex[:12]
 
+    saved_cfg = await load_saved_llm_settings(session)
     overrides = llm_overrides or {}
-    api_key = (overrides.get("api_key") or settings.llm_api_key or "").strip()
-    base_url = (overrides.get("base_url") or settings.llm_base_url or "https://api.deepseek.com/v1").strip()
-    model_name = (overrides.get("model") or settings.llm_model or "deepseek-chat").strip()
+    api_key = (overrides.get("api_key") or saved_cfg.get("llm_api_key") or settings.llm_api_key or "").strip()
+    base_url = (
+        overrides.get("base_url")
+        or saved_cfg.get("llm_base_url")
+        or settings.llm_base_url
+        or "https://api.deepseek.com/v1"
+    ).strip()
+    model_name = (
+        overrides.get("model")
+        or saved_cfg.get("llm_model")
+        or settings.llm_model
+        or "deepseek-chat"
+    ).strip()
 
     history_turns, prev_intent = await _load_session_context(session, sid)
     turn_num = len(history_turns) // 2 + 1
@@ -569,7 +592,16 @@ async def stream_travel_agent(
         {"step": "intent", "session_id": sid, "turn": turn_num, "message": "正在结合上下文解析出行约束..."},
     )
     intent = parse_intent(query, prev_intent=prev_intent)
-    yield _sse("tool_result", {"tool": "intent_parser", "summary": intent})
+    budget_text = "免费" if intent["free_only"] else (f"¥{intent['budget']}" if intent["budget"] is not None else "不限")
+    summary_parts = [f"{intent['days']}天", f"预算{budget_text}", intent["category"] or "全类型"]
+    if intent["start_city"]:
+        summary_parts.append(f"起点:{intent['start_city']}")
+    if intent["exclude_keywords"]:
+        summary_parts.append(f"排除:{'/'.join(intent['exclude_keywords'])}")
+    yield _sse(
+        "tool_result",
+        {"tool": "intent_parser", "summary": "意图解析：" + " · ".join(summary_parts), "detail": intent},
+    )
 
     rewritten_rag_query = rewrite_rag_query(query, intent, history_turns)
     if rewritten_rag_query != query:
@@ -898,9 +930,10 @@ async def stream_travel_agent(
             yield _sse("token", {"text": piece})
             await asyncio.sleep(0.012)
 
-    # Persist conversation turns for multi-turn continuity
+    # Persist conversation turns + last plan & citations for refresh/session recovery
+    assistant_meta = json.dumps({"plan": plan, "citations": citations}, ensure_ascii=False)
     session.add(ChatTurn(session_id=sid, role="user", content=query, intent_json=json.dumps(intent, ensure_ascii=False)))
-    session.add(ChatTurn(session_id=sid, role="assistant", content="".join(full_answer_parts), intent_json="{}"))
+    session.add(ChatTurn(session_id=sid, role="assistant", content="".join(full_answer_parts), intent_json=assistant_meta))
     await session.commit()
 
     total_ms = int((time.perf_counter() - t0) * 1000)

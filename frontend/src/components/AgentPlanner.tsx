@@ -1,9 +1,12 @@
 import { useEffect, useState } from "react";
 import {
+  clearSavedLlmConfig,
   deleteAgentSession,
   detectLlmModels,
   fetchAgentSessions,
   fetchAgentSessionTurns,
+  fetchSavedLlmConfig,
+  saveLlmConfig,
   streamAgentChat,
   testLlmConnection,
 } from "../api/client";
@@ -41,6 +44,7 @@ const PRESETS = [
 const FOLLOW_UPS = ["改为5天", "预算放宽到800", "那边的避坑攻略怎么说", "顺便帮我预约门票"];
 
 const LLM_STORAGE_KEY = "roamcity_llm_config";
+const ACTIVE_SESSION_KEY = "roamcity_active_session";
 
 interface LlmEndpointPreset {
   id: string;
@@ -60,7 +64,7 @@ const LLM_ENDPOINTS: LlmEndpointPreset[] = [
 
 function loadInitialLlmConfig(): LlmConfig {
   try {
-    const raw = sessionStorage.getItem(LLM_STORAGE_KEY);
+    const raw = localStorage.getItem(LLM_STORAGE_KEY) || sessionStorage.getItem(LLM_STORAGE_KEY);
     if (raw) return JSON.parse(raw);
   } catch {
     // ignore storage access issues
@@ -100,6 +104,10 @@ export function AgentPlanner({ onApplyBookingDraft, onOpenGuide, onTransferToMap
   const [detectResult, setDetectResult] = useState<DetectModelsResult | null>(null);
   const [testingLlm, setTestingLlm] = useState(false);
   const [llmTestResult, setLlmTestResult] = useState<LlmTestResult | null>(null);
+  const [serverHasKey, setServerHasKey] = useState(false);
+  const [serverKeyMasked, setServerKeyMasked] = useState("");
+  const [savingConfig, setSavingConfig] = useState(false);
+  const [saveConfigMsg, setSaveConfigMsg] = useState("");
 
   const matchedProvider =
     LLM_ENDPOINTS.find((p) => p.baseUrl && p.baseUrl === llmConfig.baseUrl.trim()) ||
@@ -176,21 +184,71 @@ export function AgentPlanner({ onApplyBookingDraft, onOpenGuide, onTransferToMap
   }
 
   useEffect(() => {
-    reloadSessions();
+    fetchSavedLlmConfig()
+      .then((cfg) => {
+        setServerHasKey(cfg.has_api_key);
+        setServerKeyMasked(cfg.api_key_masked || "");
+        setLlmConfig((prev) => ({
+          apiKey: prev.apiKey,
+          baseUrl: prev.baseUrl || cfg.base_url || "https://api.deepseek.com/v1",
+          model: prev.model || cfg.model || "",
+        }));
+      })
+      .catch(() => {});
+
+    fetchAgentSessions()
+      .then((items) => {
+        setSessions(items);
+        let preferredId: string | null = null;
+        try {
+          preferredId = localStorage.getItem(ACTIVE_SESSION_KEY);
+        } catch {
+          preferredId = null;
+        }
+        const targetId =
+          (preferredId && items.some((s) => s.session_id === preferredId) ? preferredId : items[0]?.session_id) ||
+          null;
+        if (targetId) {
+          void loadSavedSession(targetId);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   function updateLlmConfig(next: LlmConfig) {
     setLlmConfig(next);
+    setSaveConfigMsg("");
     try {
-      sessionStorage.setItem(LLM_STORAGE_KEY, JSON.stringify(next));
+      localStorage.setItem(LLM_STORAGE_KEY, JSON.stringify(next));
     } catch {
       // ignore storage errors
+    }
+  }
+
+  async function handleSaveLlmConfig() {
+    setSavingConfig(true);
+    setSaveConfigMsg("");
+    try {
+      updateLlmConfig(llmConfig);
+      const res = await saveLlmConfig(llmConfig);
+      setServerHasKey(res.has_api_key);
+      setServerKeyMasked(res.api_key_masked || "");
+      setSaveConfigMsg("✅ 配置已保存（刷新与重启不丢失）");
+    } catch (e) {
+      setSaveConfigMsg(e instanceof Error ? e.message : "❌ 保存失败");
+    } finally {
+      setSavingConfig(false);
     }
   }
 
   function resetSession() {
     if (loading) return;
     setSessionId(null);
+    try {
+      localStorage.removeItem(ACTIVE_SESSION_KEY);
+    } catch {
+      // ignore
+    }
     setTurnCount(0);
     setHistory([]);
     setStatusMsg("");
@@ -211,12 +269,19 @@ export function AgentPlanner({ onApplyBookingDraft, onOpenGuide, onTransferToMap
       const data = await fetchAgentSessionTurns(sid);
       const msgs: ChatMsg[] = data.turns.map((t) => ({ role: t.role, text: t.content }));
       setSessionId(sid);
+      try {
+        localStorage.setItem(ACTIVE_SESSION_KEY, sid);
+      } catch {
+        // ignore
+      }
       setHistory(msgs);
       setTurnCount(Math.ceil(msgs.length / 2));
       const lastAssistant = [...msgs].reverse().find((m) => m.role === "assistant");
       setAnswer(lastAssistant?.text || "");
+      if (data.last_plan) setPlan(data.last_plan);
+      if (data.last_citations) setCitations(data.last_citations);
       setTraces([]);
-      setStatusMsg(`已恢复历史会话 #${sid.slice(0, 8)}，可继续追问`);
+      setStatusMsg(`已恢复历史会话 #${sid.slice(0, 8)}（共 ${Math.ceil(msgs.length / 2)} 轮），可直接继续追问`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "加载历史会话失败");
     }
@@ -252,7 +317,14 @@ export function AgentPlanner({ onApplyBookingDraft, onOpenGuide, onTransferToMap
         {
           onStatus: (msg, meta) => {
             setStatusMsg(msg);
-            if (meta?.session_id) setSessionId(meta.session_id);
+            if (meta?.session_id) {
+              setSessionId(meta.session_id);
+              try {
+                localStorage.setItem(ACTIVE_SESSION_KEY, meta.session_id);
+              } catch {
+                // ignore
+              }
+            }
             if (meta?.turn) setTurnCount(meta.turn);
           },
           onToolEvent: (trace) => setTraces((prev) => [...prev, trace]),
@@ -264,7 +336,14 @@ export function AgentPlanner({ onApplyBookingDraft, onOpenGuide, onTransferToMap
             setAnswer((prev) => prev + delta);
           },
           onDone: (m) => {
-            if (m.session_id) setSessionId(m.session_id);
+            if (m.session_id) {
+              setSessionId(m.session_id);
+              try {
+                localStorage.setItem(ACTIVE_SESSION_KEY, m.session_id);
+              } catch {
+                // ignore
+              }
+            }
             setMetrics(m);
             setStatusMsg("规划完成");
             if (fullAnswer.trim()) {
@@ -273,7 +352,7 @@ export function AgentPlanner({ onApplyBookingDraft, onOpenGuide, onTransferToMap
             reloadSessions();
           },
         },
-        { sessionId, llm: llmConfig.apiKey.trim() ? llmConfig : undefined }
+        { sessionId, llm: llmConfig.apiKey.trim() || llmConfig.model.trim() ? llmConfig : undefined }
       );
       setQuery("");
     } catch (e) {
@@ -323,8 +402,11 @@ export function AgentPlanner({ onApplyBookingDraft, onOpenGuide, onTransferToMap
             <span className="badge">
               {sessionId ? `多轮会话 #${sessionId.slice(0, 8)} · 第 ${turnCount} 轮` : "新会话（支持否定过滤 / 出发地锁定 / 多轮追问）"}
             </span>
-            {llmConfig.apiKey.trim() && (
-              <span className="badge orange">已启用外部 LLM ({llmConfig.model})</span>
+            {(llmConfig.apiKey.trim() || serverHasKey) && (
+              <span className="badge orange">
+                已配置外部 LLM ({llmConfig.model || "默认模型"}
+                {!llmConfig.apiKey.trim() && serverKeyMasked ? ` · 服务端 ${serverKeyMasked}` : ""})
+              </span>
             )}
           </div>
           <div style={{ display: "flex", gap: 8 }}>
@@ -449,6 +531,15 @@ export function AgentPlanner({ onApplyBookingDraft, onOpenGuide, onTransferToMap
                 <button
                   type="button"
                   className="btn btn-primary"
+                  style={{ padding: "6px 14px", fontSize: "0.82rem", background: "linear-gradient(135deg, #0d9488, #0f766e)" }}
+                  disabled={savingConfig}
+                  onClick={() => void handleSaveLlmConfig()}
+                >
+                  {savingConfig ? "保存中..." : "💾 保存配置"}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-primary"
                   style={{ padding: "6px 14px", fontSize: "0.82rem" }}
                   disabled={detectingModels || testingLlm}
                   onClick={() => void handleDetectModels(true)}
@@ -482,12 +573,30 @@ export function AgentPlanner({ onApplyBookingDraft, onOpenGuide, onTransferToMap
                     setDetectResult(null);
                     setDiscoveredModels([]);
                     setModelFilter("");
-                    updateLlmConfig({ apiKey: "", baseUrl: "https://api.deepseek.com/v1", model: "" });
+                    setServerHasKey(false);
+                    setServerKeyMasked("");
+                    setSaveConfigMsg("");
+                    try {
+                      localStorage.removeItem(LLM_STORAGE_KEY);
+                      sessionStorage.removeItem(LLM_STORAGE_KEY);
+                    } catch {
+                      // ignore
+                    }
+                    void clearSavedLlmConfig();
+                    setLlmConfig({ apiKey: "", baseUrl: "https://api.deepseek.com/v1", model: "" });
                   }}
                 >
-                  清空 Key
+                  清空保存
                 </button>
               </div>
+              {saveConfigMsg && (
+                <span style={{ fontSize: "0.82rem", fontWeight: 600, color: "#0f766e" }}>{saveConfigMsg}</span>
+              )}
+              {!llmConfig.apiKey.trim() && serverHasKey && (
+                <span style={{ fontSize: "0.78rem", color: "var(--ink-soft)" }}>
+                  服务端已记住 API Key（{serverKeyMasked}），无需重复粘贴
+                </span>
+              )}
             </div>
 
             {llmTestResult && (
@@ -806,7 +915,7 @@ export function AgentPlanner({ onApplyBookingDraft, onOpenGuide, onTransferToMap
           )}
         </div>
 
-        <div className="panel">
+        <div className="panel sticky-pane">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
             <h3>确定性 2-opt 排线结果</h3>
             {plan && (
@@ -825,7 +934,7 @@ export function AgentPlanner({ onApplyBookingDraft, onOpenGuide, onTransferToMap
           </div>
 
           {plan ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <span className="badge">总门票 ¥{plan.total_ticket_cost}</span>
                 <span className="badge">优化里程 {plan.optimized_distance_km} km</span>
@@ -834,8 +943,9 @@ export function AgentPlanner({ onApplyBookingDraft, onOpenGuide, onTransferToMap
                 )}
               </div>
 
-              <ChinaRouteMap plan={plan} height={310} />
+              <ChinaRouteMap plan={plan} height={295} />
 
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, maxHeight: "calc(100vh - 510px)", minHeight: 150, overflowY: "auto", paddingRight: 4 }}>
               {plan.days.map((d) => (
                 <div
                   key={d.day}
@@ -900,6 +1010,7 @@ export function AgentPlanner({ onApplyBookingDraft, onOpenGuide, onTransferToMap
                   </button>
                 </div>
               )}
+              </div>
             </div>
           ) : (
             <p style={{ color: "var(--ink-soft)", fontSize: "0.92rem" }}>

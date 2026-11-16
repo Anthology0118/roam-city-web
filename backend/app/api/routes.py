@@ -1,5 +1,6 @@
 import asyncio
-from datetime import date
+from datetime import date, timezone
+import datetime as dt
 import json
 import re
 import time
@@ -12,10 +13,10 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent.planner_agent import stream_travel_agent
+from app.agent.planner_agent import load_saved_llm_settings, stream_travel_agent
 from app.algo.route_planner import SpotNode, build_itinerary
 from app.core.config import get_settings
-from app.db.models import BookingOrder, ChatTurn, FavoriteSpot, GuideChunk, Spot
+from app.db.models import AppSetting, BookingOrder, ChatTurn, FavoriteSpot, GuideChunk, Spot
 from app.db.seed import compute_char_ngram_embedding
 from app.db.session import get_db
 from app.rag.retriever import hybrid_search_guides
@@ -381,12 +382,13 @@ class TestLlmRequest(BaseModel):
 
 
 @router.post("/agent/test-llm")
-async def test_llm_connection(req: TestLlmRequest) -> dict:
+async def test_llm_connection(req: TestLlmRequest, db: AsyncSession = Depends(get_db)) -> dict:
     """Probe OpenAI-compatible endpoint connectivity, latency, and available models."""
     settings = get_settings()
-    api_key = (req.api_key or settings.llm_api_key or "").strip()
-    base_url = (req.base_url or settings.llm_base_url or "https://api.deepseek.com/v1").strip().rstrip("/")
-    model = (req.model or settings.llm_model or "deepseek-chat").strip()
+    saved = await load_saved_llm_settings(db)
+    api_key = (req.api_key or saved.get("llm_api_key") or settings.llm_api_key or "").strip()
+    base_url = (req.base_url or saved.get("llm_base_url") or settings.llm_base_url or "https://api.deepseek.com/v1").strip().rstrip("/")
+    model = (req.model or saved.get("llm_model") or settings.llm_model or "deepseek-chat").strip()
 
     if not api_key:
         return {"ok": False, "latency_ms": 0, "model": model, "error": "请先填写 API Key 再测试连通性"}
@@ -484,11 +486,12 @@ async def _probe_single_model(
 
 
 @router.post("/agent/detect-models")
-async def detect_llm_models(req: DetectModelsRequest) -> dict:
+async def detect_llm_models(req: DetectModelsRequest, db: AsyncSession = Depends(get_db)) -> dict:
     """Discover all models exposed by an OpenAI-compatible endpoint and concurrently probe usability."""
     settings = get_settings()
-    api_key = (req.api_key or settings.llm_api_key or "").strip()
-    base_url = (req.base_url or settings.llm_base_url or "").strip().rstrip("/")
+    saved = await load_saved_llm_settings(db)
+    api_key = (req.api_key or saved.get("llm_api_key") or settings.llm_api_key or "").strip()
+    base_url = (req.base_url or saved.get("llm_base_url") or settings.llm_base_url or "").strip().rstrip("/")
 
     if not api_key:
         return {"ok": False, "models": [], "probed": [], "usable_models": [], "error": "请先填写 API Key"}
@@ -593,17 +596,88 @@ async def list_chat_sessions(db: AsyncSession = Depends(get_db)) -> dict:
     return {"items": items[:20]}
 
 
+class SaveLlmConfigRequest(BaseModel):
+    api_key: str = Field(default="", max_length=256)
+    base_url: str = Field(default="", max_length=256)
+    model: str = Field(default="", max_length=128)
+
+
+@router.get("/agent/llm-config")
+async def get_llm_config(db: AsyncSession = Depends(get_db)) -> dict:
+    saved = await load_saved_llm_settings(db)
+    settings = get_settings()
+    raw_key = saved.get("llm_api_key") or settings.llm_api_key or ""
+    masked = f"{raw_key[:5]}***{raw_key[-4:]}" if len(raw_key) > 10 else ("***" if raw_key else "")
+    return {
+        "has_api_key": bool(raw_key),
+        "api_key_masked": masked,
+        "base_url": saved.get("llm_base_url") or settings.llm_base_url,
+        "model": saved.get("llm_model") or settings.llm_model,
+    }
+
+
+@router.post("/agent/llm-config")
+async def save_llm_config(req: SaveLlmConfigRequest, db: AsyncSession = Depends(get_db)) -> dict:
+    pairs: dict[str, str] = {
+        "llm_base_url": req.base_url.strip(),
+        "llm_model": req.model.strip(),
+    }
+    if req.api_key.strip() and "***" not in req.api_key:
+        pairs["llm_api_key"] = req.api_key.strip()
+
+    now = dt.datetime.now(timezone.utc)
+    for k, v in pairs.items():
+        row = await db.get(AppSetting, k)
+        if row:
+            row.value = v
+            row.updated_at = now
+        else:
+            db.add(AppSetting(key=k, value=v, updated_at=now))
+    await db.commit()
+    saved = await load_saved_llm_settings(db)
+    raw_key = saved.get("llm_api_key") or ""
+    masked = f"{raw_key[:5]}***{raw_key[-4:]}" if len(raw_key) > 10 else ("***" if raw_key else "")
+    return {
+        "saved": True,
+        "has_api_key": bool(raw_key),
+        "api_key_masked": masked,
+        "base_url": saved.get("llm_base_url", ""),
+        "model": saved.get("llm_model", ""),
+    }
+
+
+@router.delete("/agent/llm-config")
+async def clear_llm_config(db: AsyncSession = Depends(get_db)) -> dict:
+    await db.execute(delete(AppSetting).where(AppSetting.key.in_(["llm_api_key", "llm_base_url", "llm_model"])))
+    await db.commit()
+    return {"cleared": True}
+
+
 @router.get("/agent/sessions/{session_id}")
 async def get_chat_session(session_id: str, db: AsyncSession = Depends(get_db)) -> dict:
     turns = (
         await db.execute(select(ChatTurn).where(ChatTurn.session_id == session_id).order_by(ChatTurn.id.asc()))
     ).scalars().all()
+    last_plan = None
+    last_citations = []
+    for t in reversed(turns):
+        if t.role == "assistant" and t.intent_json and t.intent_json != "{}":
+            try:
+                meta = json.loads(t.intent_json)
+                if meta.get("plan") or meta.get("citations"):
+                    last_plan = meta.get("plan")
+                    last_citations = meta.get("citations") or []
+                    break
+            except Exception:
+                pass
     return {
         "session_id": session_id,
         "turns": [
             {"role": t.role, "content": t.content, "created_at": t.created_at.isoformat()}
             for t in turns
         ],
+        "last_plan": last_plan,
+        "last_citations": last_citations,
     }
 
 
