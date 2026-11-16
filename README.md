@@ -2,6 +2,23 @@
 
 > 从大一纯静态前端课设重构升级为 **AI 应用全栈工程项目**：**React 18 + TypeScript + Vite**（前端）+ **Python FastAPI + SQLAlchemy Async**（后端）+ **Hybrid RAG（BM25 + 向量 RRF）** + **2-opt TSP 路径规划算法**。
 
+## 页面效果展示
+
+### 1. AI 行程规划工作台（多轮对话 + ReAct 工具编排 + 3D 沙盘联动）
+![AI 行程规划工作台](images/agent-planner.jpg)
+
+### 2. 3D 中国三级阶梯海拔 / 气候沙盘与 2-opt 排线实验室
+![3D 中国地形气候沙盘与 2-opt 排线](images/china-3d-map.jpg)
+
+### 3. 精选景点检索、排序与心愿单
+![精选景点检索与筛选](images/scenic-explorer.jpg)
+
+### 4. Hybrid RAG 攻略检索、关键词高亮与原文溯源
+![Hybrid RAG 攻略检索与原文对照](images/rag-guides.jpg)
+
+### 5. 数据库事务门票预约（乐观锁防超卖 + 电子入园凭证）
+![数据库事务门票预约与实时订单](images/booking-desk.jpg)
+
 ## 核心架构与技术亮点
 
 1. **AI 行程规划 Agent（多轮记忆 + 6 工具真流式调用 + 实时模型检测与持久化）**
@@ -87,5 +104,6 @@ npm run build
 │     ├─ api/               # REST 客户端与 ReadableStream SSE 解析
 │     ├─ components/        # AI 工作台 / 3D 沙盘排线 / 景点检索 / RAG 消融入库 / 图集 / 门票凭证
 │     └─ utils/             # 中国三级阶梯海拔地形与五大气候带着色模型
+├─ images/                  # 项目页面效果截图（嵌入 README）
 └─ index.html ...           # 大一初版静态页面（已修复已知弹窗与 XSS 隐患）
 ```
