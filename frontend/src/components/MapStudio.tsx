@@ -14,6 +14,7 @@ export function MapStudio({ onBookSpot, initialSpotIds, initialDays, initialBudg
   const defaultIds = initialSpotIds && initialSpotIds.length > 0 ? initialSpotIds : ["gugong", "xian", "jiuzhaigou", "lijiang"];
   const [spots, setSpots] = useState<Spot[]>([]);
   const [selectedIds, setSelectedIds] = useState<string[]>(defaultIds);
+  const [startSpotId, setStartSpotId] = useState<string>("");
   const [favCount, setFavCount] = useState(0);
   const [days, setDays] = useState(initialDays || 3);
   const [budget, setBudget] = useState<string>(initialBudget != null ? String(initialBudget) : "");
@@ -24,7 +25,7 @@ export function MapStudio({ onBookSpot, initialSpotIds, initialDays, initialBudg
   useEffect(() => {
     fetchSpots().then((items) => {
       setSpots(items);
-      void runOptimize(defaultIds, initialDays || 3, initialBudget != null ? String(initialBudget) : "");
+      void runOptimize(defaultIds, initialDays || 3, initialBudget != null ? String(initialBudget) : "", "");
     });
     fetchFavorites().then((ids) => setFavCount(ids.length)).catch(() => {});
   }, []);
@@ -34,9 +35,10 @@ export function MapStudio({ onBookSpot, initialSpotIds, initialDays, initialBudg
       const nextDays = initialDays || days;
       const nextBudget = initialBudget != null ? String(initialBudget) : "";
       setSelectedIds(initialSpotIds);
+      setStartSpotId("");
       if (initialDays) setDays(initialDays);
       setBudget(nextBudget);
-      void runOptimize(initialSpotIds, nextDays, nextBudget);
+      void runOptimize(initialSpotIds, nextDays, nextBudget, "");
     }
   }, [initialSpotIds, initialDays, initialBudget]);
 
@@ -50,13 +52,14 @@ export function MapStudio({ onBookSpot, initialSpotIds, initialDays, initialBudg
         return;
       }
       setSelectedIds(ids);
-      void runOptimize(ids, days, budget);
+      setStartSpotId("");
+      void runOptimize(ids, days, budget, "");
     } catch (e) {
       setErr(e instanceof Error ? e.message : "读取心愿单失败");
     }
   }
 
-  async function runOptimize(ids: string[], d: number, budgetVal: string) {
+  async function runOptimize(ids: string[], d: number, budgetVal: string, anchorId: string = startSpotId) {
     if (ids.length === 0) {
       setPlan(null);
       return;
@@ -65,7 +68,12 @@ export function MapStudio({ onBookSpot, initialSpotIds, initialDays, initialBudg
     setErr("");
     try {
       const b = budgetVal.trim() ? Number(budgetVal) : null;
-      const res = await optimizeRoute({ spot_ids: ids, days: d, budget: b });
+      const res = await optimizeRoute({
+        spot_ids: ids,
+        days: d,
+        budget: b,
+        start_spot_id: anchorId || undefined,
+      });
       setPlan(res);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "求解失败");
@@ -74,16 +82,27 @@ export function MapStudio({ onBookSpot, initialSpotIds, initialDays, initialBudg
     }
   }
 
+  function estimateTransit(km: number): string {
+    if (km <= 0) return "";
+    if (km >= 900) return `✈️ 约 ${(km / 750 + 1.1).toFixed(1)}h`;
+    if (km >= 180) return `🚄 约 ${(km / 240 + 0.5).toFixed(1)}h`;
+    return `🚗 约 ${(km / 65).toFixed(1)}h`;
+  }
+
   function toggleSpot(id: string) {
-    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+    setSelectedIds((prev) => {
+      const next = prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id];
+      if (!next.includes(startSpotId)) setStartSpotId("");
+      return next;
+    });
   }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
       <div className="hero-banner">
-        <h1>3D 中国地理坐标沙盘与 2-opt 最短路径实验室</h1>
+        <h1>3D 中国海拔气候沙盘与 2-opt 最短路径实验室</h1>
         <p>
-          基于 d3-geo Mercator 投影与 Three.js WebGL 立体挤出渲染全国 34 省级地形、36 处真实景区光柱与 3D 贝塞尔飞线；支持拖拽旋转、悬停高亮与心愿单路线求解。
+          基于 d3-geo Mercator 投影与 Three.js WebGL 构建 122×90 三级阶梯海拔浮雕与五大气候环境带；支持指定出发起点实时求解 2-opt 最短路径并估算跨城交通耗时。
         </p>
       </div>
 
@@ -133,7 +152,20 @@ export function MapStudio({ onBookSpot, initialSpotIds, initialDays, initialBudg
             })}
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
+            <label>
+              出发起点（可选）
+              <select value={startSpotId} onChange={(e) => setStartSpotId(e.target.value)}>
+                <option value="">自动最优（高分首站）</option>
+                {spots
+                  .filter((s) => selectedIds.includes(s.id))
+                  .map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
             <label>
               计划天数
               <select value={days} onChange={(e) => setDays(Number(e.target.value))}>
@@ -160,7 +192,7 @@ export function MapStudio({ onBookSpot, initialSpotIds, initialDays, initialBudg
             type="button"
             className="btn btn-primary"
             disabled={loading || selectedIds.length === 0}
-            onClick={() => void runOptimize(selectedIds, days, budget)}
+            onClick={() => void runOptimize(selectedIds, days, budget, startSpotId)}
           >
             {loading ? "算法求解中..." : `运行 2-opt 排线（已选 ${selectedIds.length} 处）`}
           </button>
@@ -189,7 +221,9 @@ export function MapStudio({ onBookSpot, initialSpotIds, initialDays, initialBudg
                       >
                         <span>
                           {idx + 1}. {st.name}
-                          {st.distance_from_prev_km > 0 ? ` (+${st.distance_from_prev_km}km)` : ""}
+                          {st.distance_from_prev_km > 0
+                            ? ` (+${st.distance_from_prev_km}km · ${estimateTransit(st.distance_from_prev_km)})`
+                            : ""}
                         </span>
                         <button
                           type="button"

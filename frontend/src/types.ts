@@ -72,11 +72,15 @@ export interface BookingOrder {
   count: number;
   visitor_name: string;
   phone: string;
+  id_card_masked?: string;
+  email?: string;
   total_price: number;
   status: "CONFIRMED" | "CANCELLED";
   created_at?: string;
   remaining_stock?: number;
 }
+
+export type RagMode = "hybrid" | "bm25" | "vector";
 
 export interface GuideSearchHit {
   id: string;
@@ -121,6 +125,15 @@ export interface LlmConfig {
   apiKey: string;
   baseUrl: string;
   model: string;
+}
+
+export interface LlmTestResult {
+  ok: boolean;
+  latency_ms: number;
+  model: string;
+  reply_preview?: string;
+  available_models?: string[];
+  error?: string;
 }
 
 export interface AgentDoneMetrics {

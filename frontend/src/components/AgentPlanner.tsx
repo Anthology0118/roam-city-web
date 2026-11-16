@@ -4,6 +4,7 @@ import {
   fetchAgentSessions,
   fetchAgentSessionTurns,
   streamAgentChat,
+  testLlmConnection,
 } from "../api/client";
 import type {
   AgentDoneMetrics,
@@ -13,6 +14,7 @@ import type {
   CitationItem,
   ItineraryPlan,
   LlmConfig,
+  LlmTestResult,
 } from "../types";
 import { ChinaRouteMap } from "./ChinaRouteMap";
 import { MarkdownView } from "./MarkdownView";
@@ -37,6 +39,27 @@ const PRESETS = [
 const FOLLOW_UPS = ["改为5天", "预算放宽到800", "那边的避坑攻略怎么说", "顺便帮我预约门票"];
 
 const LLM_STORAGE_KEY = "roamcity_llm_config";
+
+interface LlmProviderPreset {
+  id: string;
+  label: string;
+  baseUrl: string;
+  models: string[];
+}
+
+const LLM_PROVIDERS: LlmProviderPreset[] = [
+  { id: "deepseek", label: "DeepSeek", baseUrl: "https://api.deepseek.com/v1", models: ["deepseek-chat", "deepseek-reasoner"] },
+  {
+    id: "qwen",
+    label: "通义千问 DashScope",
+    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    models: ["qwen-plus", "qwen-max", "qwen-turbo"],
+  },
+  { id: "glm", label: "智谱 GLM", baseUrl: "https://open.bigmodel.cn/api/paas/v4", models: ["glm-4-plus", "glm-4-flash"] },
+  { id: "kimi", label: "Moonshot Kimi", baseUrl: "https://api.moonshot.cn/v1", models: ["moonshot-v1-8k", "moonshot-v1-32k"] },
+  { id: "openai", label: "OpenAI", baseUrl: "https://api.openai.com/v1", models: ["gpt-4o-mini", "gpt-4o"] },
+  { id: "custom", label: "自定义", baseUrl: "", models: [] },
+];
 
 function loadInitialLlmConfig(): LlmConfig {
   try {
@@ -74,6 +97,37 @@ export function AgentPlanner({ onApplyBookingDraft, onOpenGuide, onTransferToMap
   const [error, setError] = useState("");
   const [showLlmConfig, setShowLlmConfig] = useState(false);
   const [llmConfig, setLlmConfig] = useState<LlmConfig>(loadInitialLlmConfig);
+  const [customModelMode, setCustomModelMode] = useState(false);
+  const [discoveredModels, setDiscoveredModels] = useState<string[]>([]);
+  const [testingLlm, setTestingLlm] = useState(false);
+  const [llmTestResult, setLlmTestResult] = useState<LlmTestResult | null>(null);
+
+  const matchedProvider =
+    LLM_PROVIDERS.find((p) => p.baseUrl && p.baseUrl === llmConfig.baseUrl.trim()) || LLM_PROVIDERS[LLM_PROVIDERS.length - 1];
+  const modelOptions = Array.from(
+    new Set([...(matchedProvider.models || []), ...discoveredModels, llmConfig.model].filter(Boolean))
+  );
+
+  async function handleTestLlm() {
+    setTestingLlm(true);
+    setLlmTestResult(null);
+    try {
+      const res = await testLlmConnection(llmConfig);
+      setLlmTestResult(res);
+      if (res.available_models && res.available_models.length > 0) {
+        setDiscoveredModels(res.available_models);
+      }
+    } catch (e) {
+      setLlmTestResult({
+        ok: false,
+        latency_ms: 0,
+        model: llmConfig.model,
+        error: e instanceof Error ? e.message : "测试请求失败",
+      });
+    } finally {
+      setTestingLlm(false);
+    }
+  }
 
   function reloadSessions() {
     fetchAgentSessions().then(setSessions).catch(() => {});
@@ -254,53 +308,164 @@ export function AgentPlanner({ onApplyBookingDraft, onOpenGuide, onTransferToMap
           </div>
         </div>
 
-        {/* Optional Runtime LLM Configuration Drawer */}
+        {/* Optional Runtime LLM Configuration Drawer with Presets, Model Selector & Live Test */}
         {showLlmConfig && (
           <div
             style={{
               background: "#faf8f2",
               border: "1px solid var(--line)",
               borderRadius: 12,
-              padding: 12,
+              padding: 14,
               marginBottom: 12,
-              display: "grid",
-              gridTemplateColumns: "1fr 1fr 0.8fr auto",
+              display: "flex",
+              flexDirection: "column",
               gap: 10,
-              alignItems: "end",
             }}
           >
-            <label style={{ fontSize: "0.82rem" }}>
-              OpenAI 兼容 API Key（仅存当前浏览器会话，留空则用零门槛兜底引擎）
-              <input
-                type="password"
-                value={llmConfig.apiKey}
-                onChange={(e) => updateLlmConfig({ ...llmConfig, apiKey: e.target.value })}
-                placeholder="sk-..."
-              />
-            </label>
-            <label style={{ fontSize: "0.82rem" }}>
-              Base URL
-              <input
-                value={llmConfig.baseUrl}
-                onChange={(e) => updateLlmConfig({ ...llmConfig, baseUrl: e.target.value })}
-                placeholder="https://api.deepseek.com/v1"
-              />
-            </label>
-            <label style={{ fontSize: "0.82rem" }}>
-              Model
-              <input
-                value={llmConfig.model}
-                onChange={(e) => updateLlmConfig({ ...llmConfig, model: e.target.value })}
-                placeholder="deepseek-chat"
-              />
-            </label>
-            <button
-              type="button"
-              className="chip"
-              onClick={() => updateLlmConfig({ apiKey: "", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat" })}
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+              <span style={{ fontSize: "0.8rem", color: "var(--ink-soft)", fontWeight: 600 }}>服务商预设：</span>
+              {LLM_PROVIDERS.map((p) => {
+                const active = matchedProvider.id === p.id;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    className={`chip ${active ? "active" : ""}`}
+                    style={{ padding: "3px 10px", fontSize: "0.76rem" }}
+                    onClick={() => {
+                      setLlmTestResult(null);
+                      setDiscoveredModels([]);
+                      if (p.id === "custom") {
+                        setCustomModelMode(true);
+                      } else {
+                        setCustomModelMode(false);
+                        updateLlmConfig({
+                          ...llmConfig,
+                          baseUrl: p.baseUrl,
+                          model: p.models[0] || llmConfig.model,
+                        });
+                      }
+                    }}
+                  >
+                    {p.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+                gap: 10,
+                alignItems: "end",
+              }}
             >
-              清空 Key
-            </button>
+              <label style={{ fontSize: "0.82rem" }}>
+                API Key（仅存当前浏览器会话，留空走本地兜底）
+                <input
+                  type="password"
+                  value={llmConfig.apiKey}
+                  onChange={(e) => {
+                    setLlmTestResult(null);
+                    updateLlmConfig({ ...llmConfig, apiKey: e.target.value });
+                  }}
+                  placeholder="sk-..."
+                />
+              </label>
+
+              <label style={{ fontSize: "0.82rem" }}>
+                Base URL（兼容 OpenAI 协议）
+                <input
+                  value={llmConfig.baseUrl}
+                  onChange={(e) => {
+                    setLlmTestResult(null);
+                    updateLlmConfig({ ...llmConfig, baseUrl: e.target.value });
+                  }}
+                  placeholder="https://api.deepseek.com/v1"
+                />
+              </label>
+
+              <label style={{ fontSize: "0.82rem" }}>
+                模型选择{discoveredModels.length > 0 ? `（已拉取 ${discoveredModels.length} 个）` : ""}
+                {customModelMode ? (
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <input
+                      value={llmConfig.model}
+                      onChange={(e) => updateLlmConfig({ ...llmConfig, model: e.target.value })}
+                      placeholder="输入模型 ID"
+                    />
+                    <button
+                      type="button"
+                      className="chip"
+                      style={{ whiteSpace: "nowrap", fontSize: "0.76rem" }}
+                      onClick={() => setCustomModelMode(false)}
+                    >
+                      列表
+                    </button>
+                  </div>
+                ) : (
+                  <select
+                    value={llmConfig.model}
+                    onChange={(e) => {
+                      if (e.target.value === "__custom__") {
+                        setCustomModelMode(true);
+                      } else {
+                        setLlmTestResult(null);
+                        updateLlmConfig({ ...llmConfig, model: e.target.value });
+                      }
+                    }}
+                  >
+                    {modelOptions.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                    <option value="__custom__">+ 手动输入其他模型...</option>
+                  </select>
+                )}
+              </label>
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  style={{ padding: "6px 14px", fontSize: "0.82rem" }}
+                  disabled={testingLlm}
+                  onClick={() => void handleTestLlm()}
+                >
+                  {testingLlm ? "⏳ 正在测试接口..." : "⚡ 测试连通性"}
+                </button>
+                <button
+                  type="button"
+                  className="chip"
+                  style={{ padding: "5px 12px", fontSize: "0.8rem" }}
+                  onClick={() => {
+                    setLlmTestResult(null);
+                    setDiscoveredModels([]);
+                    updateLlmConfig({ apiKey: "", baseUrl: "https://api.deepseek.com/v1", model: "deepseek-chat" });
+                  }}
+                >
+                  清空 Key
+                </button>
+              </div>
+
+              {llmTestResult && (
+                <div
+                  style={{
+                    fontSize: "0.82rem",
+                    fontWeight: 600,
+                    color: llmTestResult.ok ? "#047857" : "#b91c1c",
+                  }}
+                >
+                  {llmTestResult.ok
+                    ? `✅ 连接成功 · ${llmTestResult.latency_ms}ms · ${llmTestResult.model}（回复：${llmTestResult.reply_preview}）`
+                    : `❌ 连接失败${llmTestResult.latency_ms ? ` (${llmTestResult.latency_ms}ms)` : ""}：${llmTestResult.error}`}
+                </div>
+              )}
+            </div>
           </div>
         )}
 

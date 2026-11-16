@@ -3,10 +3,10 @@ import uuid
 from datetime import date, timedelta
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 
 from app.agent.planner_agent import _exec_tool, parse_intent, rewrite_rag_query
-from app.db.models import Spot
+from app.db.models import GuideChunk, Spot
 from app.db.session import AsyncSessionLocal
 from app.main import app, lifespan
 
@@ -163,3 +163,45 @@ async def test_agent_constraints_rewrite_and_extended_tools():
 
             res_orders, _ = await _exec_tool("query_bookings", {}, db, all_spots)
             assert "orders" in res_orders
+
+
+@pytest.mark.asyncio
+async def test_rag_modes_ingest_and_llm_test_endpoint():
+    async with lifespan(app):
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            for m in ("hybrid", "bm25", "vector"):
+                r = await client.get("/api/guides/search", params={"q": "茶卡盐湖", "mode": m})
+                assert r.status_code == 200
+                assert r.json()["mode"] == m
+                assert len(r.json()["items"]) >= 1
+
+            ing = await client.post(
+                "/api/guides/ingest",
+                json={
+                    "title": "测试自定义秘境攻略",
+                    "category": "测试",
+                    "content": "# 交通贴士\n建议清晨乘坐接驳车避开高峰人流。\n\n# 门票建议\n提前三天预约。",
+                    "tags": ["测试攻略"],
+                },
+            )
+            assert ing.status_code == 201
+            gid = ing.json()["guide_id"]
+            assert ing.json()["chunks_created"] == 2
+
+            hit = await client.get("/api/guides/search", params={"q": "清晨乘坐接驳车避开高峰"})
+            assert any(item["guide_id"] == gid for item in hit.json()["items"])
+
+            # Clean up test-ingested chunks
+            async with AsyncSessionLocal() as db:
+                await db.execute(delete(GuideChunk).where(GuideChunk.guide_id == gid))
+                await db.commit()
+
+            # LLM connectivity tester validation when key is absent
+            t_empty = await client.post("/api/agent/test-llm", json={"api_key": "", "base_url": "https://api.deepseek.com/v1"})
+            assert t_empty.status_code == 200
+            assert t_empty.json()["ok"] is False
+
+            t_bad_url = await client.post("/api/agent/test-llm", json={"api_key": "sk-test", "base_url": "ftp://bad"})
+            assert t_bad_url.status_code == 200
+            assert t_bad_url.json()["ok"] is False

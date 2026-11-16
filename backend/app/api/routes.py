@@ -1,16 +1,21 @@
 from datetime import date
 import json
 import re
+import time
+from typing import Literal
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
+import httpx
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent.planner_agent import stream_travel_agent
 from app.algo.route_planner import SpotNode, build_itinerary
+from app.core.config import get_settings
 from app.db.models import BookingOrder, ChatTurn, FavoriteSpot, GuideChunk, Spot
+from app.db.seed import compute_char_ngram_embedding
 from app.db.session import get_db
 from app.rag.retriever import hybrid_search_guides
 
@@ -76,11 +81,13 @@ async def search_guides(
     q: str = Query(..., min_length=1),
     cat: str | None = Query(default=None),
     top_k: int = Query(default=3, ge=1, le=10),
+    mode: Literal["hybrid", "bm25", "vector"] = Query(default="hybrid"),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    chunks = await hybrid_search_guides(db, query=q, category=cat, top_k=top_k)
+    chunks = await hybrid_search_guides(db, query=q, category=cat, top_k=top_k, mode=mode)
     return {
         "query": q,
+        "mode": mode,
         "items": [
             {
                 "id": c.id,
@@ -95,6 +102,69 @@ async def search_guides(
             }
             for c in chunks
         ],
+    }
+
+
+class IngestGuideRequest(BaseModel):
+    title: str = Field(min_length=2, max_length=100)
+    category: str = Field(default="攻略", min_length=1, max_length=24)
+    content: str = Field(min_length=10, max_length=8000)
+    tags: list[str] = Field(default_factory=list)
+
+
+def _split_guide_sections(raw_text: str, max_chars: int = 320) -> list[tuple[str, str]]:
+    """Split user-supplied guide text into titled chunks for RAG indexing."""
+    blocks = [b.strip() for b in re.split(r"\n\s*\n+", raw_text.strip()) if b.strip()]
+    sections: list[tuple[str, str]] = []
+    cur_title = "核心要点"
+    for b in blocks:
+        lines = b.splitlines()
+        if lines and lines[0].startswith("#"):
+            cur_title = lines[0].lstrip("#").strip()[:40] or cur_title
+            body = "\n".join(lines[1:]).strip()
+            if not body:
+                continue
+        else:
+            body = b
+        for i in range(0, len(body), max_chars):
+            part = body[i : i + max_chars].strip()
+            if part:
+                sec_name = cur_title if i == 0 else f"{cur_title}（续）"
+                sections.append((sec_name, part))
+    return sections or [("核心要点", raw_text.strip()[:max_chars])]
+
+
+@router.post("/guides/ingest", status_code=201)
+async def ingest_guide(req: IngestGuideRequest, db: AsyncSession = Depends(get_db)) -> dict:
+    guide_id = f"custom-{uuid.uuid4().hex[:8]}"
+    sections = _split_guide_sections(req.content)
+    tags_text = " ".join(req.tags)
+    created_ids: list[str] = []
+
+    for idx, (sec_title, text) in enumerate(sections, start=1):
+        chunk_id = f"{guide_id}-{idx}"
+        full_text = f"{req.title} {sec_title} {tags_text} {text}"
+        emb_json = json.dumps(compute_char_ngram_embedding(full_text))
+        db.add(
+            GuideChunk(
+                id=chunk_id,
+                guide_id=guide_id,
+                guide_title=req.title.strip(),
+                category=req.category.strip(),
+                section_title=sec_title,
+                content=text,
+                metadata_json=json.dumps({"tags": req.tags, "source": "user_ingest"}, ensure_ascii=False),
+                embedding_json=emb_json,
+            )
+        )
+        created_ids.append(chunk_id)
+
+    await db.commit()
+    return {
+        "guide_id": guide_id,
+        "title": req.title.strip(),
+        "chunks_created": len(created_ids),
+        "chunk_ids": created_ids,
     }
 
 
@@ -191,6 +261,13 @@ class CreateBookingRequest(BaseModel):
         return v
 
 
+def _mask_id_card(raw: str) -> str:
+    raw = (raw or "").strip()
+    if len(raw) >= 10:
+        return f"{raw[:4]}**********{raw[-4:]}"
+    return raw
+
+
 @router.get("/bookings")
 async def list_bookings(db: AsyncSession = Depends(get_db)) -> dict:
     rows = (
@@ -208,6 +285,8 @@ async def list_bookings(db: AsyncSession = Depends(get_db)) -> dict:
                 "count": o.count,
                 "visitor_name": o.visitor_name,
                 "phone": o.phone,
+                "id_card_masked": _mask_id_card(o.id_card),
+                "email": o.email,
                 "total_price": o.total_price,
                 "status": o.status,
                 "created_at": o.created_at.isoformat(),
@@ -268,6 +347,8 @@ async def create_booking(req: CreateBookingRequest, db: AsyncSession = Depends(g
         "count": order.count,
         "visitor_name": order.visitor_name,
         "phone": order.phone,
+        "id_card_masked": _mask_id_card(order.id_card),
+        "email": order.email,
         "total_price": order.total_price,
         "status": order.status,
         "remaining_stock": remaining_stock,
@@ -290,6 +371,78 @@ async def cancel_booking(order_id: str, db: AsyncSession = Depends(get_db)) -> d
     )
     await db.commit()
     return {"id": order.id, "status": order.status}
+
+
+class TestLlmRequest(BaseModel):
+    api_key: str | None = Field(default=None, max_length=256)
+    base_url: str | None = Field(default=None, max_length=256)
+    model: str | None = Field(default=None, max_length=128)
+
+
+@router.post("/agent/test-llm")
+async def test_llm_connection(req: TestLlmRequest) -> dict:
+    """Probe OpenAI-compatible endpoint connectivity, latency, and available models."""
+    settings = get_settings()
+    api_key = (req.api_key or settings.llm_api_key or "").strip()
+    base_url = (req.base_url or settings.llm_base_url or "https://api.deepseek.com/v1").strip().rstrip("/")
+    model = (req.model or settings.llm_model or "deepseek-chat").strip()
+
+    if not api_key:
+        return {"ok": False, "latency_ms": 0, "model": model, "error": "请先填写 API Key 再测试连通性"}
+    if not base_url.startswith(("http://", "https://")):
+        return {"ok": False, "latency_ms": 0, "model": model, "error": "Base URL 必须以 http:// 或 https:// 开头"}
+
+    t0 = time.perf_counter()
+    available_models: list[str] = []
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            # Optional best-effort /models discovery
+            try:
+                m_resp = await client.get(f"{base_url}/models", headers={"Authorization": f"Bearer {api_key}"})
+                if m_resp.status_code == 200:
+                    data = m_resp.json().get("data") or []
+                    available_models = [str(item.get("id")) for item in data if item.get("id")][:25]
+            except Exception:
+                pass
+
+            resp = await client.post(
+                f"{base_url}/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={
+                    "model": model,
+                    "messages": [{"role": "user", "content": "请回复 OK"}],
+                    "max_tokens": 12,
+                    "temperature": 0,
+                },
+            )
+            latency_ms = int((time.perf_counter() - t0) * 1000)
+            if resp.status_code >= 400:
+                err_detail = resp.text[:240]
+                return {
+                    "ok": False,
+                    "latency_ms": latency_ms,
+                    "model": model,
+                    "available_models": available_models,
+                    "error": f"HTTP {resp.status_code}: {err_detail}",
+                }
+            body = resp.json()
+            reply = ((body.get("choices") or [{}])[0].get("message") or {}).get("content", "")
+            return {
+                "ok": True,
+                "latency_ms": latency_ms,
+                "model": body.get("model") or model,
+                "reply_preview": str(reply).strip()[:60] or "OK",
+                "available_models": available_models,
+            }
+    except Exception as exc:
+        latency_ms = int((time.perf_counter() - t0) * 1000)
+        return {
+            "ok": False,
+            "latency_ms": latency_ms,
+            "model": model,
+            "available_models": available_models,
+            "error": str(exc) or exc.__class__.__name__,
+        }
 
 
 class ChatRequest(BaseModel):

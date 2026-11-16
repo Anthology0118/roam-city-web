@@ -112,6 +112,10 @@ export function App() {
         )}
         {tab === "scenic" && (
           <ScenicExplorer
+            onLocateSpot={(spotId) => {
+              setMapTransfer({ spotIds: [spotId], days: 1, budget: null });
+              setTab("map");
+            }}
             onBookSpot={(spotId) => {
               setBookingPrefill({ spotId, count: 1 });
               setTab("booking");

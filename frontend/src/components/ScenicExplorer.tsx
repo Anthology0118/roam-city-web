@@ -4,16 +4,21 @@ import type { Spot } from "../types";
 
 interface Props {
   onBookSpot: (spotId: string) => void;
+  onLocateSpot?: (spotId: string) => void;
 }
+
+type SortBy = "default" | "rating" | "price_asc" | "views";
 
 const CATS = ["全部", "自然山水", "人文历史", "古城古镇", "海岛海滨"];
 
-export function ScenicExplorer({ onBookSpot }: Props) {
+export function ScenicExplorer({ onBookSpot, onLocateSpot }: Props) {
   const [cat, setCat] = useState("全部");
   const [kw, setKw] = useState("");
   const [spots, setSpots] = useState<Spot[]>([]);
   const [favIds, setFavIds] = useState<string[]>([]);
   const [onlyFavs, setOnlyFavs] = useState(false);
+  const [onlyFree, setOnlyFree] = useState(false);
+  const [sortBy, setSortBy] = useState<SortBy>("default");
   const [selected, setSelected] = useState<Spot | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -40,7 +45,15 @@ export function ScenicExplorer({ onBookSpot }: Props) {
     }
   }
 
-  const visibleSpots = onlyFavs ? spots.filter((s) => favIds.includes(s.id)) : spots;
+  const visibleSpots = spots
+    .filter((s) => (!onlyFavs || favIds.includes(s.id)) && (!onlyFree || s.price === 0))
+    .slice()
+    .sort((a, b) => {
+      if (sortBy === "rating") return b.rating - a.rating;
+      if (sortBy === "price_asc") return a.price - b.price;
+      if (sortBy === "views") return b.views - a.views;
+      return 0;
+    });
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -66,17 +79,32 @@ export function ScenicExplorer({ onBookSpot }: Props) {
           ))}
           <button
             type="button"
+            className={`chip ${onlyFree ? "active" : ""}`}
+            onClick={() => setOnlyFree((v) => !v)}
+          >
+            免费景区
+          </button>
+          <button
+            type="button"
             className={`chip ${onlyFavs ? "active" : ""}`}
             onClick={() => setOnlyFavs((v) => !v)}
           >
             ♥ 心愿单 ({favIds.length})
           </button>
         </div>
-        <input
-          value={kw}
-          onChange={(e) => setKw(e.target.value)}
-          placeholder="防抖搜索：输入城市、景点名或标签（如 丽江 / 亲子 / 故宫）"
-        />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10 }}>
+          <input
+            value={kw}
+            onChange={(e) => setKw(e.target.value)}
+            placeholder="防抖搜索：输入城市、景点名或标签（如 丽江 / 亲子 / 故宫）"
+          />
+          <select value={sortBy} onChange={(e) => setSortBy(e.target.value as SortBy)} style={{ width: 150 }}>
+            <option value="default">默认排序</option>
+            <option value="rating">评分从高到低</option>
+            <option value="price_asc">票价从低到高</option>
+            <option value="views">热度人气优先</option>
+          </select>
+        </div>
       </div>
 
       {loading && <p style={{ marginBottom: 12, color: "var(--ink-soft)" }}>正在从后端检索景点...</p>}
@@ -146,7 +174,7 @@ export function ScenicExplorer({ onBookSpot }: Props) {
                 </div>
                 <div>实时余票：{selected.daily_stock} 张</div>
               </div>
-              <div style={{ marginTop: 16, display: "flex", gap: 10 }}>
+              <div style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap" }}>
                 <button
                   className="btn btn-outline"
                   type="button"
@@ -154,6 +182,18 @@ export function ScenicExplorer({ onBookSpot }: Props) {
                 >
                   {favIds.includes(selected.id) ? "♥ 移出心愿单" : "♡ 加入心愿单"}
                 </button>
+                {onLocateSpot && (
+                  <button
+                    className="btn btn-outline"
+                    type="button"
+                    onClick={() => {
+                      onLocateSpot(selected.id);
+                      setSelected(null);
+                    }}
+                  >
+                    在 3D 沙盘定位 →
+                  </button>
+                )}
                 <button
                   className="btn btn-primary"
                   type="button"
@@ -162,7 +202,7 @@ export function ScenicExplorer({ onBookSpot }: Props) {
                     setSelected(null);
                   }}
                 >
-                  立即预约该景区门票 →
+                  立即预约门票 →
                 </button>
               </div>
             </div>

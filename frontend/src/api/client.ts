@@ -9,6 +9,8 @@ import type {
   GuideSearchHit,
   ItineraryPlan,
   LlmConfig,
+  LlmTestResult,
+  RagMode,
   Spot,
 } from "../types";
 
@@ -29,12 +31,28 @@ export async function fetchGuides(): Promise<GuideDoc[]> {
   return data.items;
 }
 
-export async function searchGuidesRag(q: string): Promise<GuideSearchHit[]> {
-  const qs = new URLSearchParams({ q, top_k: "4" });
+export async function searchGuidesRag(q: string, mode: RagMode = "hybrid"): Promise<GuideSearchHit[]> {
+  const qs = new URLSearchParams({ q, top_k: "4", mode });
   const res = await fetch(`/api/guides/search?${qs.toString()}`);
   if (!res.ok) throw new Error("RAG 检索失败");
   const data = await res.json();
   return data.items;
+}
+
+export async function ingestGuide(payload: {
+  title: string;
+  category: string;
+  content: string;
+  tags?: string[];
+}): Promise<{ guide_id: string; title: string; chunks_created: number }> {
+  const res = await fetch("/api/guides/ingest", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "攻略入库失败");
+  return data;
 }
 
 export async function fetchBookings(): Promise<BookingOrder[]> {
@@ -99,6 +117,21 @@ export async function toggleFavorite(spotId: string): Promise<{ spot_id: string;
   const data = await res.json();
   if (!res.ok) throw new Error(data.detail || "收藏操作失败");
   return data;
+}
+
+export async function testLlmConnection(llm: LlmConfig): Promise<LlmTestResult> {
+  const res = await fetch("/api/agent/test-llm", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      api_key: llm.apiKey.trim(),
+      base_url: llm.baseUrl.trim(),
+      model: llm.model.trim(),
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.detail || "连通性测试失败");
+  return data as LlmTestResult;
 }
 
 export async function fetchAgentSessions(): Promise<AgentSessionSummary[]> {
