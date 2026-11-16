@@ -62,6 +62,20 @@ function renderInline(text: string, keyPrefix: string, onCiteClick?: (index: num
   return parts;
 }
 
+function parseTableRow(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => cell.trim());
+}
+
+function isTableSeparatorRow(line: string): boolean {
+  const cells = parseTableRow(line);
+  return cells.length > 0 && cells.every((c) => /^:?-{2,}:?$/.test(c));
+}
+
 export function MarkdownView({ content, placeholder, onCiteClick }: MarkdownViewProps) {
   if (!content.trim()) {
     return <p className="md-placeholder">{placeholder || ""}</p>;
@@ -164,6 +178,41 @@ export function MarkdownView({ content, placeholder, onCiteClick }: MarkdownView
       continue;
     }
 
+    // Markdown GFM Table (handles standard multi-line tables)
+    if (/^\s*\|.+\|\s*$/.test(line) && i + 1 < lines.length && isTableSeparatorRow(lines[i + 1])) {
+      const headers = parseTableRow(line);
+      i += 2; // skip header + separator
+      const rows: string[][] = [];
+      while (i < lines.length && /^\s*\|.+\|\s*$/.test(lines[i])) {
+        rows.push(parseTableRow(lines[i]));
+        i++;
+      }
+      const k = `b-${blockKey++}`;
+      blocks.push(
+        <div className="md-table-wrap" key={k}>
+          <table className="md-table">
+            <thead>
+              <tr>
+                {headers.map((h, hIdx) => (
+                  <th key={hIdx}>{renderInline(h, `${k}-th-${hIdx}`, onCiteClick)}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r, rIdx) => (
+                <tr key={rIdx}>
+                  {headers.map((_, cIdx) => (
+                    <td key={cIdx}>{renderInline(r[cIdx] ?? "", `${k}-td-${rIdx}-${cIdx}`, onCiteClick)}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+      continue;
+    }
+
     // Paragraph (combine consecutive plain lines)
     const paraLines: string[] = [];
     while (
@@ -173,7 +222,8 @@ export function MarkdownView({ content, placeholder, onCiteClick }: MarkdownView
       !/^(#{1,4})\s+/.test(lines[i]) &&
       !lines[i].trim().startsWith(">") &&
       !/^\s*[-*•]\s+/.test(lines[i]) &&
-      !/^\s*\d+\.\s+/.test(lines[i])
+      !/^\s*\d+\.\s+/.test(lines[i]) &&
+      !(/^\s*\|.+\|\s*$/.test(lines[i]) && i + 1 < lines.length && isTableSeparatorRow(lines[i + 1]))
     ) {
       paraLines.push(lines[i].trim());
       i++;
