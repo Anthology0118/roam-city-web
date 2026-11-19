@@ -225,6 +225,17 @@ async def test_rag_modes_ingest_and_llm_test_endpoint():
                 assert t_bad_url.status_code == 200
                 assert t_bad_url.json()["ok"] is False
 
+                # SSRF protection must block cloud metadata & private LAN endpoints
+                t_ssrf = await client.post("/api/agent/test-llm", json={"api_key": "sk-test", "base_url": "http://169.254.169.254/latest/meta-data"})
+                assert t_ssrf.status_code == 200
+                assert t_ssrf.json()["ok"] is False
+                assert "SSRF" in (t_ssrf.json().get("error") or "")
+
+                # Security headers must be attached
+                h_resp = await client.get("/api/health")
+                assert h_resp.headers.get("x-content-type-options") == "nosniff"
+                assert h_resp.headers.get("x-frame-options") == "DENY"
+
                 d_empty = await client.post("/api/agent/detect-models", json={"api_key": "", "base_url": "https://api.deepseek.com/v1"})
                 assert d_empty.status_code == 200
                 assert d_empty.json()["ok"] is False

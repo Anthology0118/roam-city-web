@@ -147,3 +147,8 @@ roam-city/
 │     └─ utils/             # 34 省无缝浮雕地形网格与解析梯度法线着色引擎
 └─ images/                  # README 页面展示截图
 ```
+
+## 安全与开源协议
+
+- **安全防护**：内置 HTTP 安全响应头（`X-Frame-Options` / `X-Content-Type-Options` / `Referrer-Policy`）、外部 LLM 端点 **SSRF 拦截校验**、关键写接口 **IP 滑动窗口限流**、乐观锁并发防超卖与敏感字段脱敏，详见 [SECURITY.md](SECURITY.md)。
+- **开源协议**：本项目基于 [MIT License](LICENSE) 开源，仅限技术学习与合法合规演示使用，禁止用于未授权探测或恶意滥用。

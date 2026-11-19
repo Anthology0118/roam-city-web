@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent.planner_agent import load_saved_llm_settings, stream_travel_agent
 from app.algo.route_planner import SpotNode, build_itinerary
 from app.core.config import get_settings
+from app.core.security import validate_llm_base_url
 from app.db.models import AppSetting, BookingOrder, ChatTurn, FavoriteSpot, GuideChunk, Spot
 from app.db.seed import compute_char_ngram_embedding
 from app.db.session import get_db
@@ -392,8 +393,9 @@ async def test_llm_connection(req: TestLlmRequest, db: AsyncSession = Depends(ge
 
     if not api_key:
         return {"ok": False, "latency_ms": 0, "model": model, "error": "请先填写 API Key 再测试连通性"}
-    if not base_url.startswith(("http://", "https://")):
-        return {"ok": False, "latency_ms": 0, "model": model, "error": "Base URL 必须以 http:// 或 https:// 开头"}
+    url_ok, url_err = validate_llm_base_url(base_url)
+    if not url_ok:
+        return {"ok": False, "latency_ms": 0, "model": model, "error": url_err}
 
     t0 = time.perf_counter()
     available_models: list[str] = []
@@ -495,8 +497,9 @@ async def detect_llm_models(req: DetectModelsRequest, db: AsyncSession = Depends
 
     if not api_key:
         return {"ok": False, "models": [], "probed": [], "usable_models": [], "error": "请先填写 API Key"}
-    if not base_url.startswith(("http://", "https://")):
-        return {"ok": False, "models": [], "probed": [], "usable_models": [], "error": "Base URL 必须以 http:// 或 https:// 开头"}
+    url_ok, url_err = validate_llm_base_url(base_url)
+    if not url_ok:
+        return {"ok": False, "models": [], "probed": [], "usable_models": [], "error": url_err}
 
     discovered: list[str] = []
     fetch_error: str | None = None
@@ -560,6 +563,10 @@ class ChatRequest(BaseModel):
 
 @router.post("/agent/chat")
 async def agent_chat(req: ChatRequest, db: AsyncSession = Depends(get_db)) -> StreamingResponse:
+    if req.llm_base_url and req.llm_base_url.strip():
+        url_ok, url_err = validate_llm_base_url(req.llm_base_url)
+        if not url_ok:
+            raise HTTPException(status_code=400, detail=url_err)
     overrides = {
         "api_key": req.llm_api_key,
         "base_url": req.llm_base_url,
@@ -618,8 +625,13 @@ async def get_llm_config(db: AsyncSession = Depends(get_db)) -> dict:
 
 @router.post("/agent/llm-config")
 async def save_llm_config(req: SaveLlmConfigRequest, db: AsyncSession = Depends(get_db)) -> dict:
+    clean_url = req.base_url.strip()
+    if clean_url:
+        url_ok, url_err = validate_llm_base_url(clean_url)
+        if not url_ok:
+            raise HTTPException(status_code=400, detail=url_err)
     pairs: dict[str, str] = {
-        "llm_base_url": req.base_url.strip(),
+        "llm_base_url": clean_url,
         "llm_model": req.model.strip(),
     }
     if req.api_key.strip() and "***" not in req.api_key:
