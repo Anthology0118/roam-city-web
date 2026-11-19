@@ -531,7 +531,7 @@ export function AgentPlanner({ onApplyBookingDraft, onOpenGuide, onTransferToMap
                 <button
                   type="button"
                   className="btn btn-primary"
-                  style={{ padding: "6px 14px", fontSize: "0.82rem", background: "linear-gradient(135deg, #0d9488, #0f766e)" }}
+                  style={{ padding: "6px 14px", fontSize: "0.82rem", background: "linear-gradient(135deg, #4f46e5, #6366f1)" }}
                   disabled={savingConfig}
                   onClick={() => void handleSaveLlmConfig()}
                 >
@@ -777,7 +777,7 @@ export function AgentPlanner({ onApplyBookingDraft, onOpenGuide, onTransferToMap
                   fontSize: "0.84rem",
                   padding: "6px 10px",
                   borderRadius: 8,
-                  background: m.role === "user" ? "#f4f1e8" : "#eef6f5",
+                  background: m.role === "user" ? "#f1f5f9" : "#eef2ff",
                   color: "var(--ink)",
                 }}
               >

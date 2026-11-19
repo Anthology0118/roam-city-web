@@ -64,8 +64,15 @@ export function ScenicExplorer({ onBookSpot, onLocateSpot }: Props) {
   }, []);
 
   return (
-    <div>
-      <div className="panel" style={{ marginBottom: 20 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+      <div className="hero-banner">
+        <h1>中国 {spots.length || 126} 大精选实景地标与心愿单检索</h1>
+        <p>
+          全站接入 {spots.length || 126} 处全国 34 省市高清实景摄影，支持多维分类、关键词防抖检索、免费景区过滤、心愿单云端同步与一键定位 Three.js 3D 中国沙盘。
+        </p>
+      </div>
+
+      <div className="panel">
         <div className="chips" style={{ alignItems: "center" }}>
           {CATS.map((c) => (
             <button
@@ -82,7 +89,7 @@ export function ScenicExplorer({ onBookSpot, onLocateSpot }: Props) {
             className={`chip ${onlyFree ? "active" : ""}`}
             onClick={() => setOnlyFree((v) => !v)}
           >
-            免费景区
+            ✨ 免费景区
           </button>
           <button
             type="button"
@@ -92,56 +99,94 @@ export function ScenicExplorer({ onBookSpot, onLocateSpot }: Props) {
             ♥ 心愿单 ({favIds.length})
           </button>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 12 }}>
           <input
             value={kw}
             onChange={(e) => setKw(e.target.value)}
-            placeholder="防抖搜索：输入城市、景点名或标签（如 丽江 / 亲子 / 故宫）"
+            placeholder="🔍 防抖搜索：输入城市、景点名或特色标签（如 丽江 / 亲子 / 故宫 / 雪山）"
           />
-          <select value={sortBy} onChange={(e) => setSortBy(e.target.value as SortBy)} style={{ width: 150 }}>
-            <option value="default">默认排序</option>
-            <option value="rating">评分从高到低</option>
-            <option value="price_asc">票价从低到高</option>
-            <option value="views">热度人气优先</option>
+          <select value={sortBy} onChange={(e) => setSortBy(e.target.value as SortBy)} style={{ width: 165 }}>
+            <option value="default">默认推荐排序</option>
+            <option value="rating">⭐ 评分从高到低</option>
+            <option value="price_asc">💰 票价从低到高</option>
+            <option value="views">🔥 热度人气优先</option>
           </select>
         </div>
       </div>
 
-      {loading && <p style={{ marginBottom: 12, color: "var(--ink-soft)" }}>正在从后端检索景点...</p>}
+      {loading && <p style={{ color: "var(--ink-soft)" }}>正在从后端检索景点...</p>}
 
       <div className="card-grid">
         {visibleSpots.map((s) => {
           const liked = favIds.includes(s.id);
           return (
             <article className="spot-card" key={s.id}>
-              <img src={`/scenes/${s.scene}`} alt={s.name} loading="lazy" />
-              <div className="spot-card-body">
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span className="badge">{s.category}</span>
-                  <span style={{ fontWeight: 700, color: "var(--orange-600)" }}>
-                    {s.price === 0 ? "免费" : `¥${s.price} 起`}
+              <div className="spot-media" onClick={() => setSelected(s)}>
+                <img src={`/scenes/${s.scene}`} alt={s.name} loading="lazy" />
+                <div className="spot-media-overlay" />
+                <div className="spot-media-top">
+                  <span className="spot-glass-badge">{s.category}</span>
+                  <span className="spot-price-pill">
+                    {s.price === 0 ? "免费入园" : `¥${s.price} 起`}
                   </span>
                 </div>
-                <h3>{s.name}</h3>
-                <div style={{ fontSize: "0.84rem", color: "var(--ink-soft)" }}>
-                  📍 {s.city} · ⭐ {s.rating} · 余票 {s.daily_stock} 张
+                <div className="spot-media-bottom">
+                  <span>📍 {s.city}</span>
+                  <span>⭐ {s.rating.toFixed(1)} · ⏱️ {s.duration_hours}h</span>
                 </div>
-                <p style={{ fontSize: "0.88rem", color: "var(--ink-soft)", flex: 1 }}>{s.description}</p>
-                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+              </div>
+              <div className="spot-card-body">
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
+                  <h3 style={{ fontSize: "1.12rem", cursor: "pointer" }} onClick={() => setSelected(s)}>
+                    {s.name}
+                  </h3>
+                  <small style={{ color: "var(--ink-soft)", fontSize: "0.75rem", whiteSpace: "nowrap" }}>
+                    余票 {s.daily_stock} 张
+                  </small>
+                </div>
+                <p style={{ fontSize: "0.88rem", color: "var(--ink-soft)", flex: 1, lineHeight: 1.58 }}>
+                  {s.description}
+                </p>
+                {s.tags && s.tags.length > 0 && (
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 2 }}>
+                    {s.tags.map((tag) => (
+                      <span key={tag} className="spot-tag">
+                        #{tag}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
                   <button
                     className="btn btn-outline"
                     type="button"
                     aria-label={liked ? "取消收藏" : "加入心愿单"}
                     onClick={() => void handleToggleFav(s.id)}
-                    style={{ color: liked ? "#d63b2f" : undefined, borderColor: liked ? "#d63b2f" : undefined }}
+                    style={{
+                      padding: "7px 12px",
+                      fontSize: "0.84rem",
+                      color: liked ? "#e11d48" : undefined,
+                      borderColor: liked ? "#fda4af" : undefined,
+                      background: liked ? "#fff1f2" : undefined,
+                    }}
                   >
                     {liked ? "♥ 已收藏" : "♡ 收藏"}
                   </button>
-                  <button className="btn btn-outline" type="button" onClick={() => setSelected(s)}>
-                    详情
+                  <button
+                    className="btn btn-outline"
+                    type="button"
+                    style={{ padding: "7px 12px", fontSize: "0.84rem" }}
+                    onClick={() => setSelected(s)}
+                  >
+                    实景详情
                   </button>
-                  <button className="btn btn-primary" type="button" onClick={() => onBookSpot(s.id)}>
-                    预约
+                  <button
+                    className="btn btn-primary"
+                    type="button"
+                    style={{ padding: "7px 14px", fontSize: "0.84rem", marginLeft: "auto" }}
+                    onClick={() => onBookSpot(s.id)}
+                  >
+                    预约门票
                   </button>
                 </div>
               </div>
@@ -152,29 +197,74 @@ export function ScenicExplorer({ onBookSpot, onLocateSpot }: Props) {
 
       {selected && (
         <div className="modal-backdrop" onClick={() => setSelected(null)}>
-          <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-            <img
-              src={`/scenes/${selected.scene}`}
-              alt={selected.name}
-              style={{ width: "100%", height: 210, objectFit: "cover" }}
-            />
-            <div style={{ padding: 20 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <h2>{selected.name}</h2>
-                <button className="btn btn-outline" type="button" onClick={() => setSelected(null)}>
-                  关闭 (Esc)
-                </button>
-              </div>
-              <p style={{ margin: "10px 0", color: "var(--ink-soft)" }}>{selected.description}</p>
-              <div style={{ fontSize: "0.88rem", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                <div>城市：{selected.city}</div>
-                <div>建议时长：{selected.duration_hours} 小时</div>
+          <div className="modal-card" style={{ maxWidth: 640 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ position: "relative" }}>
+              <img
+                src={`/scenes/${selected.scene}`}
+                alt={selected.name}
+                style={{ width: "100%", height: 280, objectFit: "cover", display: "block" }}
+              />
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  background: "linear-gradient(to top, rgba(8,22,30,0.82) 0%, transparent 55%)",
+                }}
+              />
+              <div
+                style={{
+                  position: "absolute",
+                  bottom: 16,
+                  left: 20,
+                  right: 20,
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "flex-end",
+                  color: "#fff",
+                }}
+              >
                 <div>
-                  经纬度：{selected.lat.toFixed(4)}, {selected.lng.toFixed(4)}
+                  <span className="spot-glass-badge" style={{ marginBottom: 6, display: "inline-block" }}>
+                    {selected.category} · {selected.en_name}
+                  </span>
+                  <h2 style={{ fontSize: "1.5rem", textShadow: "0 2px 10px rgba(0,0,0,0.5)" }}>{selected.name}</h2>
                 </div>
-                <div>实时余票：{selected.daily_stock} 张</div>
+                <span className="spot-price-pill" style={{ fontSize: "1rem", padding: "5px 14px" }}>
+                  {selected.price === 0 ? "免费开放" : `¥${selected.price}`}
+                </span>
               </div>
-              <div style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap" }}>
+            </div>
+            <div style={{ padding: 22 }}>
+              <p style={{ margin: "0 0 14px", color: "var(--ink)", fontSize: "0.95rem", lineHeight: 1.7 }}>
+                {selected.description}
+              </p>
+              {selected.tags && selected.tags.length > 0 && (
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+                  {selected.tags.map((t) => (
+                    <span key={t} className="badge">
+                      #{t}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div
+                style={{
+                  fontSize: "0.88rem",
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: 10,
+                  background: "#f8fafc",
+                  padding: 14,
+                  borderRadius: 12,
+                  border: "1px solid var(--line)",
+                }}
+              >
+                <div>📍 所在城市：<b>{selected.city}</b></div>
+                <div>⏱️ 建议游玩：<b>{selected.duration_hours} 小时 ({selected.days_label})</b></div>
+                <div>🧭 地理坐标：<b>{selected.lat.toFixed(4)}°N, {selected.lng.toFixed(4)}°E</b></div>
+                <div>🎫 实时余票：<b>{selected.daily_stock} 张</b>（⭐ {selected.rating} 分）</div>
+              </div>
+              <div style={{ marginTop: 18, display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
                 <button
                   className="btn btn-outline"
                   type="button"
@@ -191,7 +281,7 @@ export function ScenicExplorer({ onBookSpot, onLocateSpot }: Props) {
                       setSelected(null);
                     }}
                   >
-                    在 3D 沙盘定位 →
+                    🧭 在 3D 沙盘定位 →
                   </button>
                 )}
                 <button
@@ -203,6 +293,9 @@ export function ScenicExplorer({ onBookSpot, onLocateSpot }: Props) {
                   }}
                 >
                   立即预约门票 →
+                </button>
+                <button className="btn btn-outline" type="button" onClick={() => setSelected(null)}>
+                  关闭 (Esc)
                 </button>
               </div>
             </div>

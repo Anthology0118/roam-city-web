@@ -102,7 +102,7 @@ export function MapStudio({ onBookSpot, initialSpotIds, initialDays, initialBudg
       <div className="hero-banner">
         <h1>3D 中国海拔气候沙盘与 2-opt 最短路径实验室</h1>
         <p>
-          基于 d3-geo Mercator 投影与 Three.js WebGL 构建 122×90 三级阶梯海拔浮雕与五大气候环境带；支持指定出发起点实时求解 2-opt 最短路径并估算跨城交通耗时。
+          基于 d3-geo Mercator 投影与 Three.js WebGL 构建 34 省无缝浮雕山脉与三大主题沙盘，覆盖全国 {spots.length || 126} 处真实经纬度地标；支持指定出发起点实时求解 2-opt 最短路径并估算跨城交通耗时。
         </p>
       </div>
 

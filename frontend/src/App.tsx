@@ -9,6 +9,15 @@ import type { BookingDraft } from "./types";
 
 type Tab = "agent" | "map" | "scenic" | "guide" | "gallery" | "booking";
 
+const NAV_ITEMS: Array<{ id: Tab; icon: string; label: string }> = [
+  { id: "agent", icon: "✨", label: "AI 行程规划" },
+  { id: "map", icon: "🗺️", label: "3D 中国沙盘" },
+  { id: "scenic", icon: "🏔️", label: "精选景点" },
+  { id: "guide", icon: "📚", label: "RAG 攻略库" },
+  { id: "gallery", icon: "📸", label: "视觉图集" },
+  { id: "booking", icon: "🎫", label: "门票预约" },
+];
+
 export function App() {
   const [tab, setTab] = useState<Tab>("agent");
   const [bookingPrefill, setBookingPrefill] = useState<{ spotId: string; count: number }>({
@@ -31,56 +40,25 @@ export function App() {
     <div>
       <header className="topbar">
         <div className="topbar-inner">
-          <div className="brand">
-            <span>🧭</span>
+          <div className="brand" style={{ cursor: "pointer" }} onClick={() => setTab("agent")}>
+            <span className="brand-logo">✦</span>
             <div>
               漫游城市 AI
-              <small>ROAM CITY · AI TRAVEL WORKSPACE</small>
+              <small>ROAM CITY · AI TRAVEL STUDIO</small>
             </div>
           </div>
           <nav className="nav-tabs" aria-label="主导航">
-            <button
-              type="button"
-              className={`nav-tab ${tab === "agent" ? "active" : ""}`}
-              onClick={() => setTab("agent")}
-            >
-              AI 行程规划
-            </button>
-            <button
-              type="button"
-              className={`nav-tab ${tab === "map" ? "active" : ""}`}
-              onClick={() => setTab("map")}
-            >
-              中国地图排线
-            </button>
-            <button
-              type="button"
-              className={`nav-tab ${tab === "scenic" ? "active" : ""}`}
-              onClick={() => setTab("scenic")}
-            >
-              精选景点
-            </button>
-            <button
-              type="button"
-              className={`nav-tab ${tab === "guide" ? "active" : ""}`}
-              onClick={() => setTab("guide")}
-            >
-              RAG 攻略库
-            </button>
-            <button
-              type="button"
-              className={`nav-tab ${tab === "gallery" ? "active" : ""}`}
-              onClick={() => setTab("gallery")}
-            >
-              视觉图集
-            </button>
-            <button
-              type="button"
-              className={`nav-tab ${tab === "booking" ? "active" : ""}`}
-              onClick={() => setTab("booking")}
-            >
-              门票预约
-            </button>
+            {NAV_ITEMS.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={`nav-tab ${tab === item.id ? "active" : ""}`}
+                onClick={() => setTab(item.id)}
+              >
+                <span className="nav-tab-icon">{item.icon}</span>
+                <span>{item.label}</span>
+              </button>
+            ))}
           </nav>
         </div>
       </header>

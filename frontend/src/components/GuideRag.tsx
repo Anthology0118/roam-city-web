@@ -203,7 +203,7 @@ export function GuideRag({ initialGuideId }: Props) {
                   border: "1px solid var(--line)",
                   borderRadius: 12,
                   padding: 12,
-                  background: h.guide_id === activeGuideId ? "#f2fbfa" : "#fff",
+                  background: h.guide_id === activeGuideId ? "#eef2ff" : "#fff",
                 }}
               >
                 <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 6 }}>

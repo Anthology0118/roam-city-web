@@ -326,8 +326,8 @@ export function BookingDesk({ initialSpotId, initialCount = 1 }: Props) {
             </p>
             <div
               style={{
-                background: "#f4fbfa",
-                border: "1px dashed var(--teal-500)",
+                background: "#f5f7ff",
+                border: "1px dashed #6366f1",
                 borderRadius: 12,
                 padding: 14,
                 display: "flex",
