@@ -45,31 +45,32 @@ flowchart TB
 
 ### 1. AI 模型配置、可用性实测与多轮对话工作台
 支持任意 OpenAI 兼容端点（DeepSeek / 通义千问 / SiliconFlow / OpenRouter / Ollama），内置 `/models` 自动发现、并发可用性延迟探测与持久化配置。
-![AI 模型配置与多轮对话工作台](images/agent-config.jpg)
+![AI 模型配置与多轮对话工作台](images/agent-config.png)
 
 ### 2. ReAct 6 工具流式编排 + 确定性 2-opt 排线联动
 实时展示 Tool Call / Tool Output 调用链路、零幻觉 Markdown 表格行程单、攻略引用 `[1]` 溯源，并与右侧 3D 沙盘实时联动预览景点实景。
-![AI 行程规划与 3D 沙盘联动](images/agent-planner.jpg)
+![AI 行程规划与 3D 沙盘联动](images/agent-planner.png)
 
 ### 3. Three.js 34 省无缝浮雕 3D 中国沙盘 + 2-opt TSP 实验室
 基于 `d3-geo` Mercator 投影与 `Three.js` 构建 34 省自适应三角网细分浮雕地形与解析法线，支持 **海拔阶梯 / 五大气候带 / 星夜全息** 三大主题零延迟切换、省份悬浮高亮抬升、碰撞避让地名标注、126 处真实经纬度水晶光柱与 3D 贝塞尔飞线。
-![3D 中国沙盘与 2-opt 排线实验室](images/china-3d-map.jpg)
+![3D 中国沙盘 — 三级阶梯海拔模式](images/china-3d-map-elevation.png)
+![3D 中国沙盘 — 五大气候带与景区实景悬浮预览](images/china-3d-map-climate.png)
 
 ### 4. 全国 126 处精选实景地标与心愿单检索
 覆盖全国 34 个省级行政区的 126 处真实高清实景摄影地标，支持分类筛选、免费景区过滤、防抖搜索、多维度排序及心愿单云端同步。
-![全国 126 处精选实景地标](images/scenic-explorer.jpg)
+![全国 126 处精选实景地标](images/scenic-explorer.png)
 
 ### 5. Hybrid RAG 攻略检索、消融对比与动态入库
 支持实时切换 `Hybrid RRF` / `仅 BM25` / `仅 384d 向量` 三种检索模式并高亮命中词，支持在线导入自定义攻略自动切片向量化入库。
-![Hybrid RAG 攻略检索与原文对照](images/rag-guides.jpg)
+![Hybrid RAG 攻略检索与原文对照](images/rag-guides.png)
 
 ### 6. 山河实景视觉图集
 精选高清实景大片卡片流，支持按风光主题筛选、点赞互动与键盘方向键（`←` / `→` / `Esc`）全屏灯箱浏览。
-![山河实景视觉图集](images/gallery-view.jpg)
+![山河实景视觉图集](images/gallery-view.png)
 
 ### 7. 数据库事务门票预约（乐观锁防超卖 + 电子核销凭证）
 基于版本号 `version` 实现高并发乐观锁库存扣减（单测验证 8 并发不超卖），支持 18 位实名核验脱敏、两步确认退票回滚库存及电子入园二维码凭证。
-![数据库事务门票预约与实时订单](images/booking-desk.jpg)
+![数据库事务门票预约与实时订单](images/booking-desk.png)
 
 ## 关键技术指标与离线评测
 
